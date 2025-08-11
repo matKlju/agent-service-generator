@@ -23,15 +23,16 @@ load_dotenv()
 if not os.getenv("OPENAI_API_KEY"):
     raise EnvironmentError("Missing OPENAI_API_KEY in .env file")
 
-# Simulated user input (later we can load from file or CLI)
-input_data = {
-  "serviceName": "Currency rate against EURO",
-  "description": "This service fetches currency rates against EURO. The resposne should return the format of: 'Currency rate against EURO is (result)'",
-  "apiUrl": "https://api.frankfurter.dev/v1/latest",
-  "httpMethod": "GET",
-  "serviceInput": "AUD",
-  "additionalParams": ""
-}
+# Load input data from the dedicated 'input.json' file
+try:
+    with open('input.json', 'r') as f:
+        input_data = json.load(f)
+except FileNotFoundError:
+    print("Error: input.json not found. Please create it in the root directory.")
+    sys.exit(1)
+except json.JSONDecodeError:
+    print("Error: Could not decode JSON from input.json.")
+    sys.exit(1)
 
 # Format input as JSON string for the LLM
 input_json = json.dumps(input_data, indent=2)
