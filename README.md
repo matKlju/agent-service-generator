@@ -55,5 +55,5 @@ An AI agent service generator that uses a YAML-based DSL to define and create ne
     ```
 2.  **Run Script:**
     ```bash
-    python ai_agent_network.py
+    python run.py
     ```

@@ -14,4 +14,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Run ai_agent_network.py when the container launches
-CMD ["python", "ai_agent_network.py"]
+CMD ["python", "run.py"]
