@@ -16,6 +16,18 @@ An AI agent service generator that uses a YAML-based DSL to define and create ne
     OPENAI_API_KEY=your_openai_api_key_here
     ```
 
+2.  **Create `input.json` file:**
+    This file will contain the query for generating a service. Edit this file with your desired service details.
+    ```json
+    {
+      "serviceName": "Example Service",
+      "description": "A short description of the example service.",
+      "apiUrl": "https://api.example.com/data",
+      "httpMethod": "GET",
+      "serviceInput": ""
+    }
+    ```
+
 ## How to Run
 
 ### Option 1: Docker (Recommended)
@@ -28,9 +40,6 @@ An AI agent service generator that uses a YAML-based DSL to define and create ne
     ```bash
     # Using the helper script
     ./run.sh
-
-    # Or running the full command
-    docker run -v $(pwd)/DSL:/app/DSL --env-file .env agent-service-generator
     ```
 
 ### Option 2: Python Virtual Environment
