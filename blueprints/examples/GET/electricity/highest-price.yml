@@ -1,0 +1,84 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "Electricity Highest Price Service"
+  description: "This service fetches the Elering electricity prices for a user-specified date and returns the highest price"
+  method: POST
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: startDateTime
+        type: string
+        description: "Parameter 'startDateTime' - 'yyyy-mm-ddT00:00:00.000Z' - UTC"
+      - field: endDateTime
+        type: string
+        description: "Parameter 'endDateTime'- - 'yyyy-mm-ddT00:00:00.000Z' - UTC"
+
+# Prepare Dates based on today
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    startDateTime: "${new Date(new Date().getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0] + 'T21:00:00.000Z'}"
+    endDateTime: "${new Date().toISOString().split('T')[0] + 'T20:59:59.000Z'}"
+  next: priceForToday
+
+priceForToday:
+  call: http.get
+  args:
+    url: https://dashboard.elering.ee/api/nps/price
+    query:
+      start: ${startDateTime}
+      end: ${endDateTime}
+  result: eleringToday
+  next: assignVariables
+
+assignVariables:
+  assign:
+    maxPrice: ${eleringToday.response.body.data.ee.sort((a, b) => b.price - a.price)[0].price}  # get highest price
+    maxPriceTimestamp: ${eleringToday.response.body.data.ee.sort((a, b) => b.price - a.price)[0].timestamp}  # get timestamp for highest price
+
+    tallinnOffset: 7200  # Tallinn is UTC+2 during DST (2 hours in seconds)
+    adjustedTimestamp: ${maxPriceTimestamp + tallinnOffset} 
+    adjustedHour: ${Math.floor((adjustedTimestamp % 86400) / 3600)}
+    timeVar: ${("0" + adjustedHour).slice(-2) + ":00"}
+  next: assignResponse
+
+assignResponse:
+  assign:
+    res: {
+       "result": "Täna on kõrgeim elektri börsihind kell ${timeVar}, hinnaga ${maxPrice} €/mWh"
+    }
+  next: formatMessages
+
+# format throgh DM bot response to messages
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+  next: returnResult
+
+returnResult:
+  return: ${formatMessage.response.body}

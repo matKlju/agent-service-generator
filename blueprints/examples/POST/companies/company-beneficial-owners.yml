@@ -1,0 +1,82 @@
+declaration:
+  call: declare
+  version: 0.1
+  description: "Gets beneficial owners of a business from the Business Register"
+  method: POST
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "Parameter 'chatId'"
+      - field: authorId
+        type: string
+        description: "Parameter 'authorId'"  
+      - field: message
+        type: string
+        description: "Registry code of the requested company"
+      - field: reg_code
+        type: string
+        description: "Registry code of the requested company"
+      - field: username
+        type: string
+        description: "X-Road API username"
+      - field: password
+        type: string
+        description: "X-Road API password"
+
+extract_body:
+  assign:
+    message: ${incoming.body.input[0]}
+    chatId: ${incoming.body.chatId}
+    authorId: ${incoming.body.authorId}
+
+getBeneficialOwnersData:
+  call: http.post
+  args:
+    url: "[#XTR]/ar/tegelikudKasusaajad_v2"
+    body:
+      reg_code: "${message}" 
+      username: "[#XTR_AR_USERNAME]" 
+      password: "[#XTR_AR_PASSWORD]"
+  result: beneficialOwnersData
+  
+mapBeneficialOwnersData:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/get-business-register-beneficial-owners"
+    headers:
+      type: "json"
+    body:
+      keha: ${beneficialOwnersData.response.body.tegelikudKasusaajad_v2Response.keha}
+  result: mappedBeneficialOwnersData
+  next: assign_response
+
+assign_response:
+  assign:
+    res: ${mappedBeneficialOwnersData.response.body}
+  next: format_messages
+
+format_messages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/filter-beneficiaries-related-information-for-business-register"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatted_messages_res
+
+return_result:
+  return: ${formatted_messages_res.response.body}

@@ -1,0 +1,75 @@
+declaration:
+  call: declare
+  version: 0.1
+  description: "Gets related persons of a business from the Business Register"
+  method: POST
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    params:
+      - field: chatId
+        type: string
+        description: "Parameter 'chatId'"
+      - field: authorId
+        type: string
+        description: "Parameter 'authorId'"  
+      - field: message
+        type: string
+        description: "Registry code of the requested company"
+      - field: reg_code
+        type: string
+        description: "Registry code of the requested company"
+
+extract_body:
+  assign:
+    message: ${incoming.body.input[0]}
+    chatId: ${incoming.body.chatId}
+    authorId: ${incoming.body.authorId}
+
+getRelatedPersons:
+  call: http.post
+  args:
+    url: "[#XTR]/ar/ettevottegaSeotudIsikud_v1"
+    body:
+      reg_code: "${message}"
+  result: relatedPersons
+  next: mapRelatedPersons
+
+mapRelatedPersons:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/get-business-register-related-persons"
+    headers:
+      type: "json"
+    body:
+      keha: ${relatedPersons.response.body.ettevottegaSeotudIsikud_v1Response.keha}
+  result: mappedRelatedPersons
+  next: assign_response
+
+assign_response:
+  assign:
+    res: ${mappedRelatedPersons.response.body}
+  next: format_messages
+
+format_messages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/filter-company-related-persons"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatted_messages_res
+
+return_result:
+  return: ${formatted_messages_res.response.body}

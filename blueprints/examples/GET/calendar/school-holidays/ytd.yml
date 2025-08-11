@@ -1,0 +1,84 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "EOY - end of year"
+  description: "Provides all school holidays from current date untill the end of year"
+  method: POST
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    endDate: ${new Date().toISOString().split('T')[0]} 
+    startDate: ${endDate.split('-')[0] + '-01-01'} # end of current year
+  next: getAllHolidays
+
+getAllHolidays:
+  call: http.get
+  args:
+    url: https://openholidaysapi.org/SchoolHolidays?countryIsoCode=EE&languageIsoCode=EE&validFrom=${startDate}&validTo=${endDate}
+    headers:
+      accept: application/json
+  result: holidays
+
+checkHolidaysResponse:
+  switch:
+    - condition: ${holidays.response.statusCodeValue >= 400}
+      next: errorResponse
+  next: formatResult
+
+errorResponse:
+  assign:
+    res: {
+      "result": "Kahjuks ei õnnestunud hetkel pühade andmeid laadida. See võib olla ajutine tehniline probleem. Palun proovige hiljem uuesti."
+    }
+  next: formatMessages
+
+formatResult:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/calendar/school-holidays/get_school_holidays_ytd"
+    headers:
+      type: json
+    body:
+      data: ${holidays.response.body}
+  result: formattedHolidays
+  next: assignResponse
+
+assignResponse:
+  assign:
+    res: ${formattedHolidays.response.body}
+  next: formatMessages
+
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+
+return_result:
+  return: ${formatMessage.response.body}

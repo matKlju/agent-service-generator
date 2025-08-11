@@ -1,0 +1,101 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "Riigikogu 5 most recent voting results service"
+  description: "Provides information for 5 most-recent voting results in Riigikogu"
+  method: POST
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: offSet
+        type: string
+        description: "The offset for the date - 90days"
+      - field: end
+        type: string
+        description: "The end date for the voting results"
+      - field: start 
+        type: string
+        description: "The start date for the voting results"
+
+prepareVariables:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    offSet: 90 # get time period with enough data (90 days)
+    end: ${new Date().toISOString().split('T')[0]}
+    start: ${new Date(new Date(end).setDate(new Date(end).getDate() - offSet)).toISOString().split('T')[0]} 
+  next: makeAPIRequest
+
+makeAPIRequest:
+  call: http.get
+  args:
+    url: "https://api.riigikogu.ee/api/votings?endDate=${end}&lang=ET&startDate=${start}"
+    headers:
+      Accept: "application/json"
+  result: votingData
+  next: votingDataFormatting
+
+# Extracts the 5 most recent public votings related to drafts, sorted by date
+votingDataFormatting:
+  assign:
+    votingDetails: ${votingData.response.body
+      .flatMap(session => session.votings)
+      .filter(voting => voting.type.value === "Avalik" && voting.relatedDraft)
+      .sort((voting1, voting2) => new Date(voting2.startDateTime) - new Date(voting1.startDateTime))
+      .slice(0, 5)}
+    next: formatResult
+
+formatResult:
+  assign:
+    first: ${votingDetails[0]}
+    second: ${votingDetails[1]}
+    third: ${votingDetails[2]}
+    fourth: ${votingDetails[3]}
+    fifth: ${votingDetails[4]}
+    res: {
+      "result": 'Viis viimast hääletustulemust:\n\n
+        1. ${first.relatedDraft.title.replace(/"/g, "")}\n\n
+          Kohal: ${first.present}\nPuudus: ${first.absent}\nPoolt: ${first.inFavor}\nVastu: ${first.against}\nErapooletu: ${first.neutral}\nEi hääletanud: ${first.abstained}\n\n
+        2. ${second.relatedDraft.title.replace(/"/g, "")}\n\n
+          Kohal: ${second.present}\nPuudus: ${second.absent}\nPoolt: ${second.inFavor}\nVastu: ${second.against}\nErapooletu: ${second.neutral}\nEi hääletanud: ${second.abstained}\n\n
+        3. ${third.relatedDraft.title.replace(/"/g, "")}\n\n
+          Kohal: ${third.present}\nPuudus: ${third.absent}\nPoolt: ${third.inFavor}\nVastu: ${third.against}\nErapooletu: ${third.neutral}\nEi hääletanud: ${third.abstained}\n\n
+        4. ${fourth.relatedDraft.title.replace(/"/g, "")}\n\n
+          Kohal: ${fourth.present}\nPuudus: ${fourth.absent}\nPoolt: ${fourth.inFavor}\nVastu: ${fourth.against}\nErapooletu: ${fourth.neutral}\nEi hääletanud: ${fourth.abstained}\n\n
+        5. ${fifth.relatedDraft.title.replace(/"/g, "")}\n\n  
+          Kohal: ${fifth.present}\nPuudus: ${fifth.absent}\nPoolt: ${fifth.inFavor}\nVastu: ${fifth.against}\nErapooletu: ${fifth.neutral}\nEi hääletanud: ${fifth.abstained}'   
+    }
+  next: formatMessages
+
+# format throgh DM bot response to messages
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+  next: return_result
+
+return_result:
+  return: ${formatMessage.response.body}
+

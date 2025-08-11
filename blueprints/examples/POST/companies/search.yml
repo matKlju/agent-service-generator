@@ -1,0 +1,99 @@
+declaration:
+ call: declare
+ version: 0.1
+ description: "Search Companies by name"
+ method: POST
+ accepts: JSON
+ returns: JSON
+ namespace: common-services
+ allowlist:
+   params:
+     - field: input
+       type: string
+       description: "Parameter 'Input'"
+     - field: chatId
+       type: string
+       description: "Parameter 'chatId'"
+     - field: authorId
+       type: string
+       description: "Parameter 'authorId'"    
+     - field: name
+       type: string
+       description: "Parameter 'name'"  
+   headers:
+     - field: cookie
+       type: string
+       description: "Cookie field"
+
+assign_values:
+  assign:
+    input: ${incoming.body.input}
+    serviceName: ${input[0]}
+    name: ${input[1]}
+    chatId: ${incoming.body.chatId}
+    authorId: ${incoming.body.authorId}
+    buttonPrefix: "#common_service, /POST/companies/${serviceName}, ("
+
+getCompaniesWithName:
+  call: http.post
+  args:
+    url: "[#OPENSEARCH]/companies/_search/template"
+    body:
+      id: "company-with-name"
+      params: {
+        name: "${name}"
+      }
+  result: res
+
+mapData:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/get_company_with_name"
+    headers:
+      type: "json"
+    body:
+      hits: ${res.response.body.hits.hits}
+  result: mappedData
+
+addButtonsToFirstBotMessage:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/add_buttons_to_first_message"
+    headers:
+      type: json
+    body:
+      messages: ${[mappedData.response.body.companies[0]]}
+      ignoreTexts: []
+      prefix: ${buttonPrefix}
+      companies: ${mappedData.response.body.companies}
+  result: merged_messages_res
+  next: extractMergedResult
+
+extractMergedResult:
+  assign:
+    botMsg: ${merged_messages_res.response.body}
+  next: format_messages
+
+format_messages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${botMsg}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: res
+  next: return_result
+
+return_result:
+  return: ${res.response.body}
+  next: end

@@ -1,0 +1,153 @@
+declaration:
+  call: declare
+  version: 0.1
+  description: "Gets Companies Paid Work Force Taxes"
+  method: POST
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    params:
+      - field: chatId
+        type: string
+        description: "Parameter 'chatId'"
+      - field: authorId
+        type: string
+        description: "Parameter 'authorId'"  
+      - field: registry_code
+        type: string
+        description: "Parameter 'registry_code'"
+      - field: county
+        type: string
+        description: "Parameter 'county'"
+    headers:
+      - field: cookie
+        type: string
+        description: "Cookie field"
+
+extract_body:
+  assign:
+    registry_code: ${incoming.body.input[0]}
+    chatId: ${incoming.body.chatId}
+    authorId: ${incoming.body.authorId}
+    county: ${incoming.body.input[0]}
+    year: ${new Date().getFullYear().toString()}
+
+checkForParams:
+  switch:
+    - condition: ${registry_code != null}
+      next: getWithCode
+    - condition: ${county != null}
+      next: getWithCounty
+  next: getAll
+
+getWithCode:
+  call: http.post
+  args:
+    url: "[#OPENSEARCH]/companies/_search/template"
+    body:
+      id: "company-with-code"
+      params: { registry_code: "${registry_code}", field: "labor_taxes_and_payments" }
+  result: res
+  next: mapCodeData
+
+mapCodeData:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/get_work_force_taxes_with_code"
+    headers:
+      type: "json"
+    body:
+      hits: ${res.response.body.hits.hits}
+      year: ${year}
+  result: codeMappedData
+  next: checkMappedData
+
+checkMappedData:
+  switch:
+    - condition: ${codeMappedData.response.body.work_force_taxes.length > 0}
+      next: assign_code_response
+  next: return_no_companies_found
+
+assign_code_response:
+  assign:
+    res: ${codeMappedData.response.body.work_force_taxes[0]}
+  next: format_messages  
+
+return_no_companies_found:
+  return: "No companies found"
+  next: end
+
+getWithCounty:
+  call: http.post
+  args:
+    url: "[#OPENSEARCH]/companies/_search/template"
+    body:
+      id: "companies-with-county"
+      params: { county: "${county}", field: "labor_taxes_and_payments" }
+  result: res
+  next: mapCountyData
+
+mapCountyData:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/get_total_with_county"
+    headers:
+      type: "json"
+    body:
+      aggregations: ${res.response.body.aggregations}
+  result: countyMappedData
+  next: assign_county_response
+
+assign_county_response:
+  assign:
+    res: ${countyMappedData.response.body}
+  next: format_messages  
+
+getAll:
+  call: http.post
+  args:
+    url: "[#OPENSEARCH]/companies/_search/template"
+    body:
+      id: "companies"
+      params: { field: "labor_taxes_and_payments" }
+  result: res
+  next: mapAllData
+
+mapAllData:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/get_total"
+    headers:
+      type: "json"
+    body:
+      aggregations: ${res.response.body.aggregations}
+  result: allMappedData
+  next: assign_response
+
+assign_response:
+  assign:
+    res: ${allMappedData.response.body}
+  next: format_messages
+
+format_messages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatted_messages_res
+
+return_result:
+  return: ${formatted_messages_res.response.body}

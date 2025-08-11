@@ -1,0 +1,84 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "Right To Vote"
+  description: "Request to verify a person's eligibility to vote"
+  method: GET
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    id_code: ${incoming.params.input}
+  next: makeApiCall
+
+makeApiCall:
+  call: http.post
+  args:
+    url: "[#XTR]/rr/isikuHaaletamisoiguseKontroll"
+    body:
+      id_code: ${id_code}
+  result: votingRights
+
+checkResult: 
+  switch:
+    - condition: ${votingRights.response.body === "Bad Request"}
+      next: errorResponse
+    - condition: ${votingRights.response.body.Fault != null}
+      next: errorResponse
+    - condition: ${votingRights.response.body.RRIsikuHaaletamisoiguseKontrollResponse.response.Valimised.Valimine.Haaleoigus === "false"}
+      next: negativeVotingResponse
+  next: positiveResponse
+
+errorResponse:
+  assign:
+    res: {
+      "result": "Ilmnes viga. Palun kontrollige isikukoodi õigsust või proovige hiljem uuesti."
+    }
+  next: format_messages
+
+negativeVotingResponse:
+  assign:
+    res: {
+      "result": "${votingRights.response.body.RRIsikuHaaletamisoiguseKontrollResponse.response.Valimised.Valimine.Veatekst}"
+    }
+  next: format_messages
+
+positiveResponse:
+  assign:
+    res: {
+      "result": "Isikul on hääleõigus ${votingRights.response.body.RRIsikuHaaletamisoiguseKontrollResponse.response.Valimised.Valimine.ValimisteNimetus} valimistel. Kuupäev: ${votingRights.response.body.RRIsikuHaaletamisoiguseKontrollResponse.response.Valimised.Valimine.Kuupaev}"
+    }
+  next: format_messages
+
+format_messages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        botMessages: ${[res]}
+        chatId: ${chatId}
+        authorId: ${authorId}
+        authorFirstName: ""
+        authorLastName: ""
+        authorTimestamp: ${new Date().toISOString()}
+        created: ${new Date().toISOString()}
+  result: formatMessage
+  next: return_result
+
+return_result:
+  return: ${formatMessage.response.body}

@@ -1,0 +1,104 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "Find Usage"
+  description: "The service shows the last ten inquiries about a person's data."
+  method: GET
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: id_code
+        type: string
+        description: "ID code of the requested person: string"
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    id_code: ${incoming.params.input}
+
+makeApiCall:
+  call: http.post
+  args:
+    url: "[#XTR]/rr/findUsage"
+    body:
+      id_code: ${id_code}
+  result: usageResults
+
+
+# ---- CHECKS ------
+checkResult:
+  switch:
+    - condition: ${usageResults.response.body === "Bad Request"}
+      next: errorResponse
+    - condition: ${usageResults.response.body.Fault !== undefined}
+      next: checkXRoadFaultCode
+    - condition:
+  next: formatResults
+
+checkXRoadFaultCode:
+  switch:
+    - condition: ${usageResults.response.body.Fault.faultcode == "V10580"}
+      next: errorNoValidIdCode
+  next: errorResponse
+
+
+# ----- ERRORS ------
+errorResponse:
+  assign:
+    res: {
+      "result": "Ilmnes viga. Palun proovige hiljem uuesti.",
+    }
+  next: format_messages
+
+errorNoValidIdCode:
+  assign:
+    res: {
+      "result": "Antud isikukood ei ole registreeritud Rahvastikuregistris. Palun kontrollige isikukoodi õigsust või proovige hiljem uuesti."
+    }
+  next: format_messages
+
+
+# ---- RESULTS ------
+formatResults:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/population-register/format_usage_results"
+    headers:
+      type: json
+    body:
+      data: ${usageResults.response.body.findUsageResponse.usage.slice(0, 10)}
+  result: formatUsage
+
+assignResult:
+  assign:
+    res: ${formatUsage.response.body}
+
+format_messages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        botMessages: ${[res]}
+        chatId: ${chatId}
+        authorId: ${authorId}
+        authorFirstName: ""
+        authorLastName: ""
+        authorTimestamp: ${new Date().toISOString()}
+        created: ${new Date().toISOString()}
+  result: formatMessage
+  next: return_result
+
+return_result:
+  return: ${formatMessage.response.body}

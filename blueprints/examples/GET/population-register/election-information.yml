@@ -1,0 +1,135 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "Election information"
+  description: "The service lets a person check if they are on the voter list for upcoming elections and where and when they can vote"
+  method: GET
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: id_code
+        type: string
+        description: "ID code of the requested person: string"
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    id_code: ${incoming.params.input}
+
+makeApiCall:
+  call: http.post
+  args:
+    url: "[#XTR]/rr/isikuValimisteInfo"
+    body:
+      id_code: ${id_code}
+  result: votingInfo
+
+
+# ---- CHECKS ------
+checkResult:
+  switch:
+    - condition: ${votingInfo.response.body === "Bad Request"} # If xtr fails to respond
+      next: errorResponse
+    - condition: ${votingInfo.response.body.Fault !== undefined}
+      next: checkXRoadFaultCode
+    - condition: ${votingInfo.response.body.RRIsikuValimisteInfoResponse.response.viga !== undefined}
+      next: checkRRFaultCode
+    - condition: ${votingInfo.response.body.RRIsikuValimisteInfoResponse.response.valimised.valimine.valimisteViga !== undefined}
+      next: checkRRVotingError
+  next: formatVotingInfo
+
+checkXRoadFaultCode:
+  switch:
+    - condition: ${votingInfo.response.body.Fault.faultcode === "V10580"}
+      next: errorNoValidIdCode
+  next: errorResponse
+
+checkRRFaultCode:
+  switch:
+    - condition: ${votingInfo.response.body.RRIsikuValimisteInfoResponse.response.viga.kood === "L105"}
+      next: errorNoActiveVotingPeriod
+  next: errorResponse
+
+checkRRVotingError:
+  switch:
+    - condition: ${votingInfo.response.body.RRIsikuValimisteInfoResponse.response.valimised.valimine.valimisteViga.kood === "L117"}
+      next: errorNotInVoterList
+  next: errorResponse
+
+
+# ----- ERRORS ------
+errorResponse:
+  assign:
+    res: {
+      "result": "Ilmnes viga. Palun proovige hiljem uuesti.",
+    }
+  next: format_messages
+
+errorNoValidIdCode:
+  assign:
+    res: {
+      "result": "Antud isikukood ei ole registreeritud Rahvastikuregistris. Palun kontrollige isikukoodi õigsust või proovige hiljem uuesti."
+    }
+  next: format_messages
+
+errorNoActiveVotingPeriod:
+  assign:
+    res: {
+      "result": "${votingInfo.response.body.RRIsikuValimisteInfoResponse.response.viga.tekst}"
+    }
+  next: format_messages
+
+errorNotInVoterList:
+  assign:
+    res: {
+      "result": "${votingInfo.response.body.RRIsikuValimisteInfoResponse.response.valimised.valimine.valimisteViga.tekst}"
+    }
+  next: format_messages
+
+
+# ---- RESULTS ------
+formatVotingInfo:
+  assign:
+    valimisteLiigiNimetus: ${votingInfo.response.body.RRIsikuValimisteInfoResponse.response.valimised.valimine.valimisteLiigiNimetus}
+    isikuValimisteAadress: ${votingInfo.response.body.RRIsikuValimisteInfoResponse.response.valimised.valimine.isikuValimisteAadressTekst}
+    kovNimetus: ${votingInfo.response.body.RRIsikuValimisteInfoResponse.response.valimised.valimine.kovNimetus}
+    rkNumber: ${votingInfo.response.body.RRIsikuValimisteInfoResponse.response.valimised.valimine.rkNumber}
+    rkNimetus: ${votingInfo.response.body.RRIsikuValimisteInfoResponse.response.valimised.valimine.rkNimetus}
+  next: assignResults
+
+assignResults:
+  assign:
+    res: {
+      "result": "Valimiste liigi nimetus: ${valimisteLiigiNimetus}\\nIsiku valimiste aadress: ${isikuValimisteAadress}\\nKohaliku omavalitsuse nimetus: ${kovNimetus}\\nRingkonna number: ${rkNumber}\\nRingkonna nimetus: ${rkNimetus}"
+    }
+  next: format_messages
+
+format_messages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        botMessages: ${[res]}
+        chatId: ${chatId}
+        authorId: ${authorId}
+        authorFirstName: ""
+        authorLastName: ""
+        authorTimestamp: ${new Date().toISOString()}
+        created: ${new Date().toISOString()}
+  result: formatMessage
+  next: return_result
+
+return_result:
+  return: ${formatMessage.response.body}

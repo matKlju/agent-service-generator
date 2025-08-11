@@ -1,0 +1,8 @@
+{
+  "serviceName": "Currency rate against EURO",
+  "description": "This service fetches currency rates against EURO. The resposne should return the format of: 'Currency rate against EURO is (result)'",
+  "apiUrl": "https://api.frankfurter.dev/v1/latest",
+  "httpMethod": "GET",
+  "serviceInput": "AUD",
+  "additionalParams": ""
+}

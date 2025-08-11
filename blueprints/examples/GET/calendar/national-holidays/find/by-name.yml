@@ -1,0 +1,107 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "By Name"
+  description: "Searches for a national holiday by name"
+  method: GET
+  accepts: JSON
+  returns: JSON
+  allowlist:
+    body:
+    - field: chatId
+      type: string
+      description: "The chat ID for the message"
+    - field: authorId
+      type: string
+      description: "The author ID for the message"
+    - field: holidayName
+      type: string
+      description: "The holiday name to search for"
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    holidayName: ${incoming.params.input}
+    currentYear: ${new Date().toISOString().split("T")[0].slice(0,4)}
+    startDate: ${currentYear + "-01-01"}
+    endDate: ${currentYear + "-12-31"}
+  next: makeApiCall
+
+makeApiCall:
+  call: http.get
+  args:
+    url: https://openholidaysapi.org/PublicHolidays?countryIsoCode=EE&languageIsoCode=EE&validFrom=${startDate}&validTo=${endDate}
+    headers:
+      accept: application/json
+  result: holidays
+
+checkHolidays:
+  switch:
+    - condition: ${holidays.response.statusCodeValue >= 400}
+      next: errorResponse
+  next: filterHolidays
+
+errorResponse:
+  assign:
+    res: {
+      "result": "Kahjuks ei õnnestunud hetkel pühade andmeid laadida. See võib olla ajutine tehniline probleem. Palun proovige hiljem uuesti."
+    }
+  next: formatMessages
+
+filterHolidays:
+  assign:
+    filteredHolidays: ${holidays.response.body.filter(holiday => holiday.name[0].text.toLowerCase().includes(holidayName.toLowerCase()))}
+  next: checkHoliday
+
+checkHoliday:
+  switch:
+    - condition: ${filteredHolidays.length == 0}
+      next: holidayNotFound
+  next: formatResponse
+
+holidayNotFound:
+  assign:
+    res: {
+      "result": "Ei leia sellist riigipüha"
+    }
+  next: formatMessages
+
+formatResponse:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/calendar/national-holidays/get_national_holiday_by_name"
+    headers:
+      type: json
+    body:
+      data: ${filteredHolidays}
+  result: formatResponse
+  next: assignValue
+
+assignValue:
+  assign:
+    res: ${formatResponse.response.body}
+  next: formatMessages
+
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+  next: returnResult
+
+returnResult:
+  return: ${formatMessage.response.body}

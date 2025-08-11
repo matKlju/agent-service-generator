@@ -1,0 +1,50 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "{{SERVICE_NAME}}"
+  description: "{{SERVICE_DESCRIPTION}}"
+  method: "{{HTTP_METHOD}}"
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      {{ADDITIONAL_PARAMS}}
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    serviceInput: ${incoming.params.input}
+    {{LLM_GENERATED_PREPARE_ASSIGNMENTS}}
+  next: makeApiCall
+
+{{WORKFLOW_STEPS}}
+
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}"
+        }
+  result: formatMessage
+
+return_result:
+  return: ${formatMessage.response.body}

@@ -1,0 +1,72 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "Currency rate against EURO"
+  description: "This service fetches currency rates against EURO. The resposne should return the format of: 'Currency rate against EURO is (result)'"
+  method: "GET"
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    serviceInput: ${incoming.params.input}
+    
+  next: makeApiCall
+
+makeApiCall:
+  call: http.get
+  args:
+    url: https://api.frankfurter.dev/v1/latest
+  result: apiResponse
+  next: checkResponse
+
+checkResponse:
+  switch:
+    - condition: ${apiResponse.response.statusCodeValue >= 400}
+      next: errorResponse
+  next: assignResponse
+
+errorResponse:
+  assign:
+    res:
+      result: "API call failed"
+  next: formatMessages
+
+assignResponse:
+  assign:
+    res: ${apiResponse.response.body}
+  next: formatMessages
+
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}"
+        }
+  result: formatMessage
+
+return_result:
+  return: ${formatMessage.response.body}

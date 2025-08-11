@@ -1,0 +1,134 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "By Month"
+  description: "Searches for holidays by month name"
+  method: GET
+  accepts: JSON
+  returns: JSON
+  allowlist:
+    body:
+    - field: chatId
+      type: string
+      description: "The chat ID for the message"
+    - field: authorId
+      type: string
+      description: "The author ID for the message"
+    - field: monthName
+      type: string
+      description: "The month name to search for"
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    monthName: ${incoming.params.input}
+    currentYear: ${Math.floor(new Date().getFullYear())}
+    monthMap:
+      map:
+        "jaanuar": 0
+        "veebruar": 1
+        "märts": 2
+        "aprill": 3
+        "mai": 4
+        "juuni": 5
+        "juuli": 6
+        "august": 7
+        "september": 8
+        "oktoober": 9
+        "november": 10
+        "detsember": 11
+  next: prepareDates
+
+prepareDates:
+  assign:
+    monthIndex: ${monthMap.map[monthName]}
+    startDate: ${(new Date(currentYear, monthIndex, 1)).toISOString().split('T')[0]}
+    endDate: ${(new Date(currentYear, monthIndex + 1, 0)).toISOString().split('T')[0]}
+  next: makeApiCall
+
+makeApiCall:
+  call: http.get
+  args:
+    url: https://openholidaysapi.org/PublicHolidays?countryIsoCode=EE&languageIsoCode=EE&validFrom=${startDate}&validTo=${endDate}
+    headers:
+      accept: application/json
+  result: holidays
+  next: checkHoliday
+
+checkHoliday:
+  switch:
+    - condition: ${holidays.response.statusCodeValue >= 400}
+      next: errorResponse
+    - condition: ${holidays.response.body.length == 0}
+      next: holidayNotFound
+    - condition: ${holidays.response.body.length == 1}
+      next: formatSingleResponse
+    - condition: ${holidays.response.body.length > 1}
+      next: formatMultipleResponses
+  next: holidayNotFound
+
+errorResponse:
+  assign:
+    res: {
+      "result": "Kahjuks ei õnnestunud hetkel pühade andmeid laadida. See võib olla ajutine tehniline probleem. Palun proovige hiljem uuesti."
+    }
+  next: formatMessages
+
+holidayNotFound:
+  assign:
+    res: {
+      "result": "Antud kuus ei ole riigpühi"
+    }
+  next: formatMessages
+
+formatSingleResponse:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/calendar/national-holidays/get_national_holiday_by_single_month"
+    headers:
+      type: json
+    body:
+      data: ${holidays.response.body}
+  result: formattedHolidays
+  next: assignResponse
+
+formatMultipleResponses:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/calendar/national-holidays/get_national_holiday_by_month"
+    headers:
+      type: json
+    body:
+      data: ${holidays.response.body}
+  result: formattedHolidays
+  next: assignResponse
+
+assignResponse:
+  assign:
+    res: ${formattedHolidays.response.body}
+  next: formatMessages
+
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+  next: returnResult
+
+returnResult:
+  return: ${formatMessage.response.body}
+  next: end

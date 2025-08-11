@@ -1,0 +1,106 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "Residence information"
+  description: "The request for the person's current residence information"
+  method: GET
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: id_code
+        type: string
+        description: "ID code of the requested person: string"
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    id_code: ${incoming.params.input}
+
+makeApiCall:
+  call: http.post
+  args:
+    url: "[#XTR]/rr/isikuViibimiskoht" # #XTR variable needs a proper adress for live environment
+    body:
+      id_code: ${id_code}
+  result: residence
+
+checkResult:
+  switch:
+    - condition: ${residence.response.body === "Bad Request"} # If xtr fails to respond
+      next: errorResponse
+    - condition: ${residence.response.body.Fault != undefined}
+      next: checkXRoadFaultCode
+    - condition: ${residence.response.body.RRisikuViibimiskohtResponse.response.faultCode != undefined}
+      next: checkRRFaultCode
+  next: assignResult
+
+checkXRoadFaultCode:
+  switch:
+    - condition: ${residence.response.body.Fault.faultcode == "V10580"}
+      next: errorNoValidIdCode
+  next: errorResponse
+
+checkRRFaultCode:
+  switch:
+    - condition: ${residence.response.body.RRisikuViibimiskohtResponse.response.faultCode === "L080"}
+      next: errorNoResidenceInformation
+  next: errorResponse
+
+errorNoValidIdCode:
+  assign:
+    res: {
+      "result": "Antud isikukood ei ole registreeritud Rahvastikuregistris. Palun kontrollige isikukoodi õigsust või proovige hiljem uuesti."
+    }
+  next: format_messages
+
+errorNoResidenceInformation:
+  assign:
+    res: {
+      "result": "Isiku viibimsikoha andmed puuduvad Rahvastikuregistris. Palun kontrollige isikukoodi õigsust või proovige hiljem uuesti."
+    }
+  next: format_messages
+
+errorResponse:
+  assign:
+    res: {
+      "result": "Andmete päringul ilmnes viga. Palun kontrollige isikukoodi õigsust või proovige hiljem uuesti.",
+    }
+  next: format_messages
+
+assignResult:
+  assign:
+    res: {
+      "result" : "Isiku registreeritud elukoht on ${residence.response.body.RRisikuViibimiskohtResponse.response.IsikuAadressid.IsikuAadress.AadressTekstina}"
+    }
+  next: format_messages
+
+format_messages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        botMessages: ${[res]}
+        chatId: ${chatId}
+        authorId: ${authorId}
+        authorFirstName: ""
+        authorLastName: ""
+        authorTimestamp: ${new Date().toISOString()}
+        created: ${new Date().toISOString()}
+  result: formatMessage
+  next: return_result
+
+return_result:
+  return: ${formatMessage.response.body}
+

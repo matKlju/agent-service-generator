@@ -1,0 +1,7 @@
+{
+  "serviceName": "Public Holidays EE",
+  "description": "Returns Estonian public holidays for the current year",
+  "apiUrl": "https://openholidaysapi.org/PublicHolidays",
+  "httpMethod": "GET",
+  "additionalParams": ""
+}

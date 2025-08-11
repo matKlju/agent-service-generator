@@ -1,0 +1,74 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "Estimated Subsistence Minimum"
+  description: "Provides Estimated Subsistence Minimum"
+  method: POST
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+
+prepareVariables:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    lastYear: "${(new Date().getFullYear() - 1).toString()}" # YYYY - last year
+  next: makeAPIRequest
+
+makeAPIRequest:
+  call: http.post
+  args:
+    url: "https://andmed.stat.ee/api/v1/en/stat/LE27"
+    body:
+      query:
+        - code: "Näitaja"
+          selection:
+            filter: "item"
+            values:
+              - "1"
+        - code: "Aasta"
+          selection:
+            filter: "item"
+            values:
+              - ${lastYear}
+      response:
+        format: "json-stat2"
+  result: subsistence
+  next: assingResult
+
+assingResult:
+  assign:
+    res: {
+      "result": "Arvestuslik elatusmiinimum ${lastYear}. aastal on ${subsistence.response.body.value[0]} €/kuus"
+    }
+  next: formatMessages
+
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+
+return_result:
+  return: ${formatMessage.response.body}

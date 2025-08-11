@@ -1,0 +1,101 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: Member Participation Statistics Service
+  description: A service that provides participation statistics for Riigikogu members.
+  method: POST
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: endDate
+        type: string
+        description: "The end date for members praticipation"
+      - field: startDate
+        type: string
+        description: "The start date for members participation"
+      - field: year
+        type: string
+        description: "The year for members participation"
+      - field: lang
+        type: string
+        description: "The language for members participation"
+      - field: memberName
+        type: string
+        description: "The member name for members participation"
+
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+
+    endDate: ${new Date().toISOString().split('T')[0]} # yyyy-mm-dd format
+    startDate: ${new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0]}  # First day of the current year. yyyy-mm-dd
+    year: ${(new Date().getFullYear()).toString()}
+    lang: "ET"
+    memberName: "${incoming.params.input.split(',')[0]}"
+  next: makeAPIRequest
+
+makeAPIRequest:
+  call: http.get
+  args:
+    url: "https://api.riigikogu.ee/api/statistics/participations/plenary?endDate=${endDate}&startDate=${startDate}&lang=${lang}"
+    headers:
+      accept: "application/json"
+  result: attendance
+  next: filterResult
+
+filterResult:
+  assign:
+    memberData: ${attendance.response.body.find(member => member.fullName.toLowerCase().includes(memberName.toLowerCase()))}
+  next: checkFilterResult
+
+checkFilterResult:
+  switch:
+    - condition: ${memberData === undefined || memberData === null}
+      next: formatNotFound
+  next: formatResult
+
+formatNotFound:
+  assign:
+    res: {
+      "result": "Riigikogu liiget nimega '${memberName}' ei leitud. Palun proovige uuesti."
+    }
+  next: formatMessages
+
+formatResult:
+  assign:
+    res: {
+      "result": "${memberData.fullName} on ${year}. aastal osalenud ${memberData.participated} istungil ja puudunud ${memberData.absent} korda."
+    }
+  next: formatMessages
+
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+
+return_result:
+  return: ${formatMessage.response.body}

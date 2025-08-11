@@ -1,0 +1,89 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: Recent voting Service
+  description: A service that provides most recent voting result
+  method: POST
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: offSet
+        type: integer
+        description: "The time period with enough data (90 days)"
+      - field: end
+        type: string
+        description: "The end date for the voting results"
+
+prepareVariables:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    offSet: 90 # get time period with enough data (90 days)
+    end: ${new Date().toISOString().split('T')[0]}
+    start: ${new Date(new Date(end).setDate(new Date(end).getDate() - offSet)).toISOString().split('T')[0]} 
+  next: makeAPIRequest
+
+makeAPIRequest:
+  call: http.get
+  args:
+    url: "https://api.riigikogu.ee/api/votings?endDate=${end}&lang=ET&startDate=${start}"
+    headers:
+      Accept: "application/json"
+  result: votingData
+  next: votingDataFormatting
+
+# Extracts the 5 most recent public votings related to drafts, sorted by date
+votingDataFormatting:
+  assign:
+    votingDetails: ${votingData.response.body
+      .flatMap(session => session.votings)
+      .filter(voting => voting.type.value === "Avalik" && voting.relatedDraft)
+      .sort((voting1, voting2) => new Date(voting2.startDateTime) - new Date(voting1.startDateTime))
+      .slice(0, 1)}
+  next: formatResult
+
+formatResult:
+  assign:
+    voting: ${votingDetails[0]}
+    votingTitle: ${voting.relatedDraft.title.replace('\"','')}
+    inFavor: ${voting.inFavor}
+    against: ${voting.against}
+    neutral: ${voting.neutral}
+    abstained: ${voting.abstained}
+    absent: ${voting.absent}
+    present: ${voting.present}
+    res: {
+      "result": "Viimane riigikogu hääletus oli:\\n\\n${votingTitle}\\n\\nRiigikogu liikmete osalus oli järgmine:\\nKohal: ${present}\\nPuudus: ${absent}\\nPoolt: ${inFavor}\\nVastu: ${against}\\nErapooletu: ${neutral}\\nEi hääletanud: ${abstained}"
+    }
+
+  next: formatMessages
+
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+
+return_result:
+  return: ${formatMessage.response.body}

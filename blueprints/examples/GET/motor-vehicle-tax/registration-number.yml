@@ -1,0 +1,90 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "Registration Number"
+  description: "Provides motor vehcicle tac using registry number"
+  method: GET
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: regNr
+        type: string
+        description: "vehcile registry number"
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    regNr: ${incoming.params.input.replace(/\s/g, "").toLowerCase() || ""}
+  next: getTax
+
+getTax:
+  call: http.get
+  args:
+    url: https://avalik.emta.ee/msm-public/v1/vehicle-tax/calculate-by-reg-nr?regNr=${regNr}&showRegFee=true
+  result: taxData
+  next: checkTaxData
+
+checkTaxData:
+  switch:
+    - condition: ${taxData.response.body.errors.length > 0}
+      next: assignError
+  next: assignVariables
+
+assignError:
+  assign:
+    res: {
+       "result": "${taxData.response.body.errors[0].messages.et}"
+    }
+  next: formatMessages
+
+assignVariables:
+  assign:
+    yearlyTotal: ${taxData.response.body.yearlyFee.totalPrice.toFixed(2)}
+    yearlyCo2: ${taxData.response.body.yearlyFee.co2Price.toFixed(2)}
+    yearlyMass: ${taxData.response.body.yearlyFee.massPrice.toFixed(2)}
+    yearlyBase: ${taxData.response.body.yearlyFee.basePrice.toFixed(2)}
+    regTotal: ${taxData.response.body.regFee.totalPrice.toFixed(2)}
+    regCo2: ${taxData.response.body.regFee.co2Price.toFixed(2)}
+    regMass: ${taxData.response.body.regFee.massPrice.toFixed(2)}
+    regBase: ${taxData.response.body.regFee.basePrice.toFixed(2)}
+  next: assignResponse
+
+assignResponse:
+  assign:
+    res: {
+       "result": "Sõiduki ${regNr.toUpperCase()} aastamaks on kokku ${yearlyTotal}€\\nMillest baasosa on ${yearlyBase}€,\\nCO₂ eriheite osa on ${yearlyCo2}€\\nmassiosa on ${yearlyMass}€\\n\\nRegistreerimistasu tuleb ${regTotal}€\\nMillest baasosa on ${regBase}€\\nCO₂ eriheite osa on ${regCo2}€\\nmassiosa on ${regMass}€\\n"
+    }
+  next: formatMessages
+
+# format throgh DM bot response to messages
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+  next: returnResult
+
+returnResult:
+  return: ${formatMessage.response.body}

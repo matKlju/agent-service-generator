@@ -1,0 +1,122 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "By month"
+  description: "Lets user search school holidays by month name"
+  method: GET
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: input
+        type: string
+        description: "The month for which to retrieve holidays"
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    monthName: ${incoming.params.input}
+    currentYear: ${Math.floor(new Date().getFullYear())}
+    monthMap:
+      map:
+        "jaanuar": 0
+        "veebruar": 1
+        "märts": 2
+        "aprill": 3
+        "mai": 4
+        "juuni": 5
+        "juuli": 6
+        "august": 7
+        "september": 8
+        "oktoober": 9
+        "november": 10
+        "detsember": 11
+  next: prepareDates
+
+prepareDates:
+  assign:
+    monthIndex: ${monthMap.map[monthName]}
+    startDate: ${(new Date(currentYear, monthIndex, 1)).toISOString().split('T')[0]}
+    endDate: ${(new Date(currentYear, monthIndex + 1, 0)).toISOString().split('T')[0]}
+  next: getHoliday
+
+getHoliday:
+  call: http.get
+  args:
+    url: https://openholidaysapi.org/SchoolHolidays?countryIsoCode=EE&languageIsoCode=EE&validFrom=${startDate}&validTo=${endDate}
+    headers:
+      accept: application/json
+  result: holiday
+
+checkHolidaysResponse:
+  switch:
+    - condition: ${holiday.response.statusCodeValue >= 400}
+      next: errorResponse
+  next: checkHolidays
+
+errorResponse:
+  assign:
+    res: {
+      "result": "Kahjuks ei õnnestunud hetkel pühade andmeid laadida. See võib olla ajutine tehniline probleem. Palun proovige hiljem uuesti."
+    }
+  next: formatMessages
+
+checkHolidays:
+  switch:
+    - condition: ${holiday.response.body.length == 0}
+      next: assignNotFound
+  next: assignResult
+
+assignNotFound:
+  assign:
+    res: {
+      "result": "Antud kuul ei ole koolivaheaega"
+    }
+  next: formatMessages
+
+assignResult:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/calendar/school-holidays/get_school_holidays_by_month"
+    headers:
+      type: json
+    body:
+      data: ${holiday.response.body}
+  result: message
+  next: assignResponse
+
+assignResponse:
+  assign:
+    res: ${message.response.body}
+  next: formatMessages
+
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+  next: return_result
+
+return_result:
+  return: ${formatMessage.response.body}

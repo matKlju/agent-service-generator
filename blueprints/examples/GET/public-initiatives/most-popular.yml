@@ -1,0 +1,107 @@
+declaration:
+  call: declare
+  version: 0.1
+  description: "MOCK - Provides information for 5 most-popular active initiavites"
+  name: "MOCK - Most Popular Initiatives Service"
+  method: POST
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: phase
+        type: string
+        description: "The phase for the initiatives"
+      - field: signingEndsAt
+        type: string
+        description: "The end date for the initiatives"
+      - field: order
+        type: string
+        description: "The order for the initiatives"
+      - field: limit
+        type: string
+        description: "The limit for the initiatives"
+      - field: rahvalagatus
+        type: string
+        description: "Official rahvaalgatus API"
+      - field: acceptHeader
+        type: string
+        description: "Official accept-header for rahvaalgatus API"
+
+prepareVariables:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    phase: "sign"
+    signingEndsAt: "${new Date().toISOString()}"
+    order: "-signatureCount"
+    limit: "5"
+    rahvalagatus: "https://rahvaalgatus.ee"
+    acceptHeader: "application/vnd.rahvaalgatus.initiative+json; v=1"
+  next: getEvents
+
+getEvents:
+  call: http.get
+  args:
+    url: "${rahvalagatus}/initiatives?phase=${phase}&signingEndsAt>${signingEndsAt}&order=${order}&limit=${limit}"
+    headers:
+      Accept: "${acceptHeader}"
+  result: initiatives
+  next: assignVariables
+
+assignVariables:
+  assign:
+    initiatives: ${initiatives.response.body}
+    first: ${initiatives[0]}
+    second: ${initiatives[1]}
+    third: ${initiatives[2]}
+    fourth: ${initiatives[3]}
+    fifth: ${initiatives[4]}
+  next: formatResponse
+
+formatResponse:
+  assign:
+    res: {
+      "result": "Viis populaarsemat aktiivset rahvaalgatust:\\n
+        1. ${first.title}\\n
+          Kogutud allkirjad: ${first.signatureCount}/ min. allkirjad: ${first.signatureThreshold}\\n\\n
+        2. ${second.title}\\n
+          Kogutud allkirjad: ${second.signatureCount}/ min. allkirjad: ${second.signatureThreshold}\\n\\n
+        3. ${third.title}\\n
+          Kogutud allkirjad: ${third.signatureCount}/ min. allkirjad: ${third.signatureThreshold}\\n\\n
+        4. ${fourth.title}\\n
+          Kogutud allkirjad: ${fourth.signatureCount}/ min. allkirjad: ${fourth.signatureThreshold}\\n\\n
+        5. ${fifth.title}\\n
+          Kogutud allkirjad: ${fifth.signatureCount}/ min. allkirjad: ${fifth.signatureThreshold}"
+    }
+  next: formatMessages
+
+# format throgh DM bot response to messages
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+  next: returnResult
+
+returnResult:
+  return: ${formatMessage.response.body}

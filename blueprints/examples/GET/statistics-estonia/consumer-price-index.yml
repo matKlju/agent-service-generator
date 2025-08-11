@@ -1,0 +1,153 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "Consumer Price Index Query"
+  description: "Provides CPI change information per month"
+  method: POST
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: input
+        type: string
+        description: "The input in the format of: 'indicator,months,years'"
+
+prepareVariables:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    monthMap:
+      months:
+        jaanuar: "1"
+        veebruar: "2"
+        märts: "3"
+        aprill: "4"
+        mai: "5"
+        juuni: "6"
+        juuli: "7"
+        august: "8"
+        september: "9"
+        oktoober: "10"
+        november: "11"
+        detsember: "12"
+    input: "${incoming.params.input ? incoming.params.input.split(',') : []}"
+    indicator: "${input[0] || 'previous_month'}"
+    months: "${input[1] ? input[1].split('_') : [(new Date().getMonth()).toString()]}"
+    years: "${input[2] ? input[2].split('_') : [(new Date().getFullYear() - 1).toString()]}"
+  next: check_for_month
+
+check_for_month:
+  switch:
+    - condition: ${(months[0] % 1 === 0)}
+      next: makeAPIRequest
+  next: prepare_months 
+
+prepare_months:
+  assign:
+    months: "${(months.map(month => monthMap.months[month]).filter(num => num !== undefined)).length > 0 ? months.map(month => monthMap.months[month]).filter(num => num !== undefined) : [(new Date().getMonth()).toString()]}"
+  next: makeAPIRequest
+    
+# API request step
+makeAPIRequest:
+  call: http.post
+  args:
+    url: https://andmed.stat.ee/api/v1/en/stat/IA021
+    body:
+      query:
+        - code: "Näitaja"
+          selection:
+            filter: "item"
+            values: "${indicator === 'previous_year' ? ['1'] : ['2']}"
+        - code: "Aasta"
+          selection:
+            filter: "item"
+            values: ${years}
+        - code: "Kuu"
+          selection:
+            filter: "item"
+            values: ${months}
+      response:
+        format: "json-stat2"
+  result: statistics
+  next: assign_statistics_response
+
+assign_statistics_response:
+  assign:
+    stat_res: ${statistics.response.body}
+  next: check_for_error
+
+check_for_error:
+  switch:
+    - condition: ${stat_res === 'Bad Request'}
+      next: assign_error
+  next: assign_result
+
+assign_error:
+  assign:
+    res: {
+      "result": "Selle perioodi kohta hinnaindeksi andmeid ei leitud"
+    }
+  next: format_messages
+
+assign_result:
+  assign:
+    res: {
+      data: {
+        "indicator": "${indicator}",
+        "years": "${stat_res.dimension.Aasta.category.index}",
+        "months": "${stat_res.dimension.Kuu.category.label}",
+        "value": "${stat_res.value}"
+      }
+    }
+  next: format_price_index_data
+
+format_price_index_data:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/statistics-estonia/get_consumer_price_index"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+  next: return_result
+
+format_messages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+  next: return_result
+
+return_result:
+  return: ${formatMessage.response.body}
+  next: end

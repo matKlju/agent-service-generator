@@ -1,0 +1,130 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "Unemployment Rate"
+  description: "Provides Unemployment Rate in Estonia"
+  method: POST
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: period
+        type: array
+        description: "The period for the query"
+
+prepareVariables:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    period: "${incoming.params.input ? incoming.params.input.split(',') : [(new Date().getFullYear() - 1).toString()]}"
+  next: make_api_request
+
+make_api_request:
+  call: http.post
+  args:
+    url: "https://andmed.stat.ee/api/v1/en/stat/TT330"
+    body:
+      query:
+        - code: "Näitaja"
+          selection:
+            filter: "item"
+            values:
+              - "UNEMP_RATE"
+        - code: "Sugu"
+          selection:
+            filter: "item"
+            values:
+              - "T"
+        - code: "Vanuserühm"
+          selection:
+            filter: "item"
+            values:
+              - "Y16-RA"
+        - code: "Vaatlusperiood"
+          selection:
+            filter: "item"
+            values: ${period}
+      response:
+        format: "json-stat2"
+  result: subsistence
+  next: assign_stats_response
+
+assign_stats_response:
+  assign:
+    stat_res: ${subsistence.response.body}
+  next: check_for_error
+
+check_for_error:
+  switch:
+    - condition: ${stat_res === 'Bad Request'}
+      next: assign_error
+  next: check_period_length
+
+check_period_length:
+  switch:
+    - condition: ${period.length === 1}
+      next: assign_recent_rate
+  next: format_stats
+
+format_stats:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/statistics-estonia/get_unemployment_rate"
+    headers:
+      type: json
+    body:
+      data: {
+        "index": "${stat_res.dimension.Vaatlusperiood.category.index}",
+        "value": "${stat_res.value}"
+      }
+  result: format_stats_res
+  next: assign_result
+
+assign_error:
+  assign:
+    res: {
+      "result": "Töötuse määra andmed selle perioodi kohta puuduvad"
+    }
+  next: format_messages
+
+assign_recent_rate:
+  assign:
+    res: {
+      "result": "${stat_res.dimension.Vaatlusperiood.category.label[period[0]]}. aastal oli Eestis töötuse määr ${stat_res.value[0]}%"
+    }
+  next: format_messages
+
+assign_result:
+  assign:
+    res: ${format_stats_res.response.body}
+  next: format_messages
+
+format_messages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+  next: return_result
+
+return_result:
+  return: ${formatMessage.response.body}

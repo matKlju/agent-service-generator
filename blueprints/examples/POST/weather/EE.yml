@@ -1,0 +1,140 @@
+declaration:
+  call: declare
+  version: "0.1"
+  description: "Gets weather information for locations in EE - estonia"
+  method: POST
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: input
+        type: array
+        description: "The input is city name"
+
+# Assigns key variables for processing the request, including API endpoints.
+assignVariables:
+  assign:
+    chatId: ${incoming.body.chatId}
+    authorId: ${incoming.body.authorId}
+    region: "${incoming.body.input[0] || 'tallinn'}"
+    gazeteerUrl: "https://inaadress.maaamet.ee/inaadress"
+    publicapiUrl: "https://publicapi.envir.ee/v1/combinedWeatherData"
+    ilmmicroserviceUrl: "https://ilmmicroservice.envir.ee/api/forecasts"
+  next: getRegionData
+
+#--------------------------------------------------------------------------------------------------
+# Retrieves geographical data for the specified region from the gazetteer API.
+getRegionData:
+  call: http.get
+  args:
+    url: "${gazeteerUrl}/gazetteer"
+    query:
+      features: "EHAK"
+      results: "3"
+      address: ${region}
+  result: regionData
+  next: checkRegionData
+
+checkRegionData:
+  switch:
+    - condition: ${regionData.response.body.addresses != null}
+      next: assingCoordinates
+  next: assign_region_error
+
+# Assigns the weather data response.
+assign_region_error:
+  assign:
+    res: {
+      "result": "Andmeid ei leitud"
+    }
+  next: formatMessages
+
+# Extracts longitude and latitude from the region data for further API calls.
+assingCoordinates:
+  assign:
+    longitude: ${regionData.response.body.addresses[0].viitepunkt_l}
+    latitude: ${regionData.response.body.addresses[0].viitepunkt_b}
+  next: getNearestStation
+
+# Finds the nearest weather station using the provided coordinates.
+getNearestStation:
+  call: http.get
+  args:
+    url: "${publicapiUrl}/nearestStationByCoordinates"
+    query:
+      longitude: ${longitude}
+      latitude: ${latitude}
+    headers:
+      Content-type: ""
+      Accept: "application/json"
+    contentType:  json_override
+  result: nearestWeatherStation
+  next: assignStationParameters
+
+
+# Assigns the station ID - nearest weather station response.
+assignStationParameters:
+  assign:
+    stationId: ${nearestWeatherStation.response.body.entries.entry[0].id}
+  next: getWeather
+
+#--------------------------------------------------------------------------------------------------
+# Get weather data from selected weather station.
+getWeather:
+  call: http.get
+  args:
+    url: "${ilmmicroserviceUrl}/mobileLocationForecast"
+    query:
+      latitude: ${latitude}
+      longitude: ${longitude}
+      stationId: ${stationId}
+  result: weather
+  next: formatResult
+
+#--------------------------------------------------------------------------------------------------
+formatResult:
+  assign:
+    weather: ${weather.response.body.entries.entry[0]}
+    temperature: ${weather.tains.replace(',', '.')}
+    feelsLike: ${weather.tuulekylm.replace(',', '.')}
+    windSpeed: ${weather.ws10ma.replace(',', '.')}
+  next: assignResponse
+
+# Assigns the weather data response.
+assignResponse:
+  assign:
+    res: {
+      "result": "Hetkel on õhutemperatuur ${temperature}°C (tajutav ${feelsLike}°C), puhub tuul ${windSpeed}m/s."
+    }
+  next: formatMessages
+
+#--------------------------------------------------------------------------------------------------
+# format throgh DM bot response to messages
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+
+return_result:
+  return: ${formatMessage.response.body}

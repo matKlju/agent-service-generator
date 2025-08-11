@@ -1,0 +1,7 @@
+{
+  "serviceName": "Current Electricity Price",
+  "description": "This service fetches electricity prices for the current hour. The output should be in the format of 'Current elecrtricity price is (result) kWh'",
+  "apiUrl": "https://dashboard.elering.ee/api/nps/price/EE/current",
+  "httpMethod": "GET",
+  "additionalParams": ""
+}

@@ -1,0 +1,116 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "By name"
+  description: "Lets user search school holidays by name"
+  method: GET
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      - field: searchHoliday
+        type: string
+        description: "The holiday name for which to retrieve holiday"
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    holiday: ${incoming.params.input}
+    holidayMap:
+      map:
+        "talve vaheaeg": "talvepuhkus"
+        "kevad vaheaeg": "kevadpühad"
+        "suve vaheaeg": "suvepuhkus"
+        "jõulu vaheaeg": "jõulupühad"
+        "sügis vaheaeg": "sügispuhkus"
+    searchHoliday: ${holidayMap.map[holiday]}
+    currentYear: "${new Date().getFullYear()}"
+    startDate: "${new Date(new Date().getFullYear(), 0, 1).toISOString().split('T')[0]}" # January 1st of the current year
+    endDate: "${new Date(new Date().getFullYear(), 11, 31).toISOString().split('T')[0]}" # December 31st of the current year
+  next: getAllHolidays
+
+getAllHolidays:
+  call: http.get
+  args:
+    url: https://openholidaysapi.org/SchoolHolidays?countryIsoCode=EE&languageIsoCode=EE&validFrom=${startDate}&validTo=${endDate}
+    headers:
+      accept: application/json
+  result: holidays
+
+checkHolidaysResponse:
+  switch:
+    - condition: ${holidays.response.statusCodeValue >= 400}
+      next: errorResponse
+  next: filterHolidays
+
+errorResponse:
+  assign:
+    res: {
+      "result": "Kahjuks ei õnnestunud hetkel pühade andmeid laadida. See võib olla ajutine tehniline probleem. Palun proovige hiljem uuesti."
+    }
+  next: formatMessages
+
+filterHolidays:
+  assign:
+    holiday: ${holidays.response.body.filter(item => item.name[0].text === searchHoliday && (new Date(item.startDate).getFullYear() === currentYear))}
+  next: checkHoliday
+
+checkHoliday:
+  switch:
+    - condition: ${holiday.length == 0}
+      next: assignNotFound
+  next: formatResult
+
+assignNotFound:
+  assign:
+    res: {
+      "result": "Antud nimega koolivaheaega ei leitud"
+    }
+  next: formatMessages
+
+formatResult:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/calendar/school-holidays/get_school_holidays_by_name"
+    headers:
+      type: json
+    body:
+      data: ${holiday}
+  result: formattedHolidays
+  next: assignResponse
+
+assignResponse:
+  assign:
+    res: ${formattedHolidays.response.body}
+  next: formatMessages
+
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}",
+        }
+  result: formatMessage
+  next: return_result
+
+return_result:
+  return: ${formatMessage.response.body}
