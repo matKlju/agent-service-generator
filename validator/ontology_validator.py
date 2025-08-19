@@ -89,7 +89,12 @@ def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = N
     # Extract essentials
     declaration = parsed.get("declaration", {}) or {}
     service_name: str = declaration.get("name") or "unnamed_service"
-    method_str: str = (declaration.get("httpMethod") or declaration.get("http_method") or "").upper()
+    method_str: str = (
+        declaration.get("httpMethod")
+        or declaration.get("http_method")
+        or declaration.get("method")
+        or ""
+    ).upper()
     steps = parsed.get("steps") or {}
 
     if not isinstance(steps, dict):
@@ -116,20 +121,21 @@ def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = N
     # Load ontology and build individuals
     onto = _load_ontology(ontology_dir)
 
-    Service = onto.search_one(iri="*Service")
-    Step = onto.search_one(iri="*Step")
-    HttpCall = onto.search_one(iri="*HttpCall")
-    ReturnClass = onto.search_one(iri="*Return")
-    GETClass = onto.search_one(iri="*GET")
-    POSTClass = onto.search_one(iri="*POST")
-    ConstraintViolation = onto.search_one(iri="*ConstraintViolation")
+    # Resolve entities by exact name to avoid wildcard collisions (e.g., Return vs hasReturn)
+    Service = onto["Service"]
+    Step = onto["Step"]
+    HttpCall = onto["HttpCall"]
+    ReturnClass = onto["Return"]
+    GETClass = onto["GET"]
+    POSTClass = onto["POST"]
+    ConstraintViolation = onto["ConstraintViolation"]
 
-    hasStep = onto.search_one(iri="*hasStep")
-    hasReturn = onto.search_one(iri="*hasReturn")
-    hasHttpMethod = onto.search_one(iri="*hasHttpMethod")
-    hasUrl = onto.search_one(iri="*hasUrl")
-    usesBody = onto.search_one(iri="*usesBody")
-    hasViolation = onto.search_one(iri="*hasViolation")
+    hasStep = onto["hasStep"]
+    hasReturn = onto["hasReturn"]
+    hasHttpMethod = onto["hasHttpMethod"]
+    hasUrl = onto["hasUrl"]
+    usesBody = onto["usesBody"]
+    hasViolation = onto["hasViolation"]
 
     if not all([
         Service,
