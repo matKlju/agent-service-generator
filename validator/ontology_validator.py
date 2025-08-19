@@ -48,20 +48,37 @@ def _find_return_step(obj: Any) -> bool:
     return False
 
 
-def _collect_http_calls(steps: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+def _collect_http_calls(steps: Dict[str, Any]) -> List[Tuple[str, str, Dict[str, Any]]]:
     """Collect entries that look like HTTP calls.
 
-    A step is considered an HTTP call if it has a key like 'http-get' or 'http-post'.
-    Returns list of (step_name, http_payload)
+    A step is considered an HTTP call if it has `call: http.get` or `call: http.post`.
+    Returns list of (step_name, call_type, http_args_dict)
     """
-    http_calls: List[Tuple[str, Dict[str, Any]]] = []
+    http_calls: List[Tuple[str, str, Dict[str, Any]]] = []
     for step_name, step_body in steps.items():
         if not isinstance(step_body, dict):
             continue
-        for k, v in step_body.items():
-            if k in ("http-get", "http-post") and isinstance(v, dict):
-                http_calls.append((step_name, v))
+        call_val = step_body.get("call")
+        if isinstance(call_val, str) and call_val in ("http.get", "http.post"):
+            args = step_body.get("args") or {}
+            if isinstance(args, dict):
+                http_calls.append((step_name, call_val, args))
     return http_calls
+
+
+def _extract_steps(parsed_yaml: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract DSL steps from a YAML mapping.
+
+    All top-level keys except the declaration block (keys 'declare' or 'declaration')
+    are treated as steps when their values are mappings.
+    """
+    steps: Dict[str, Any] = {}
+    for key, value in parsed_yaml.items():
+        if key in ("declare", "declaration"):
+            continue
+        if isinstance(value, dict):
+            steps[key] = value
+    return steps
 
 
 def _load_ontology(ontology_dir: Path) -> Any:
@@ -95,10 +112,10 @@ def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = N
         or declaration.get("method")
         or ""
     ).upper()
+    # Newer DSLs keep steps at the top-level; fall back to 'steps' if present
     steps = parsed.get("steps") or {}
-
-    if not isinstance(steps, dict):
-        steps = {}
+    if not isinstance(steps, dict) or not steps:
+        steps = _extract_steps(parsed)
 
     http_calls = _collect_http_calls(steps)
     has_return = _find_return_step(parsed)
@@ -107,12 +124,16 @@ def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = N
     violations: List[str] = []
     if not has_return:
         violations.append("No 'return' step found")
-    for step_name, payload in http_calls:
+    for step_name, call_type, payload in http_calls:
         url = payload.get("url")
         if not isinstance(url, str) or not url.strip():
             violations.append(f"Step '{step_name}' missing or empty url")
-        if method_str == "GET" and "body" in payload:
+        # GET step may not define a body
+        if call_type == "http.get" and ("body" in payload or "plaintext" in payload):
             violations.append(f"GET step '{step_name}' should not define a body")
+        # POST step should define a body (or plaintext)
+        if call_type == "http.post" and ("body" not in payload and "plaintext" not in payload):
+            violations.append(f"POST step '{step_name}' should define a body or plaintext")
 
     # If ontology_dir unspecified, resolve default location
     if ontology_dir is None:
@@ -170,16 +191,26 @@ def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = N
     # Also bind data properties (url, usesBody) for calls.
     for step_name, step_body in steps.items():
         step_ind = None
-        if isinstance(step_body, dict) and ("http-get" in step_body or "http-post" in step_body):
-            call_payload: Dict[str, Any] = step_body.get("http-get") or step_body.get("http-post") or {}
-            step_ind = HttpCall(step_name, namespace=onto)
-            url_val = call_payload.get("url")
-            if isinstance(url_val, str) and url_val.strip():
-                step_ind.hasUrl = [url_val]
-            if "body" in call_payload:
-                step_ind.usesBody = [True]
+        if isinstance(step_body, dict):
+            call_val = step_body.get("call")
+            is_http = isinstance(call_val, str) and call_val in ("http.get", "http.post")
+            if is_http:
+                call_payload: Dict[str, Any] = step_body.get("args") or {}
+                step_ind = HttpCall(step_name, namespace=onto)
+                url_val = call_payload.get("url")
+                if isinstance(url_val, str) and url_val.strip():
+                    step_ind.hasUrl = [url_val]
+                # Body presence signals
+                uses_body = False
+                if isinstance(call_payload, dict):
+                    if "body" in call_payload or "plaintext" in call_payload:
+                        uses_body = True
+                    ct = call_payload.get("contentType")
+                    if isinstance(ct, str) and ct.lower() in ("formdata", "plaintext"):
+                        uses_body = True
+                step_ind.usesBody = [True if uses_body else False]
             else:
-                step_ind.usesBody = [False]
+                step_ind = Step(step_name, namespace=onto)
         else:
             step_ind = Step(step_name, namespace=onto)
 

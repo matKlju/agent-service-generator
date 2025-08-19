@@ -92,4 +92,155 @@
         </owl:members>
     </rdf:Description>
 
+    <!-- Additional structural constraints and validation-friendly classes -->
+
+    <!-- Service has at most one HTTP method -->
+    <owl:Class rdf:about="http://example.org/agent_service#Service">
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/agent_service#hasHttpMethod"/>
+                <owl:maxQualifiedCardinality rdf:datatype="http://www.w3.org/2001/XMLSchema#nonNegativeInteger">1</owl:maxQualifiedCardinality>
+                <owl:onClass rdf:resource="http://example.org/agent_service#HttpMethod"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+        <!-- Service has at least one step -->
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/agent_service#hasStep"/>
+                <owl:someValuesFrom rdf:resource="http://example.org/agent_service#Step"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+
+    <!-- Each HttpCall must have a URL -->
+    <owl:Class rdf:about="http://example.org/agent_service#HttpCall">
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/agent_service#hasUrl"/>
+                <owl:someValuesFrom rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+
+    <!-- Valid service equivalence: exactly one Return, at least one Step, at most one HttpMethod -->
+    <owl:Class rdf:about="http://example.org/agent_service#Valid_Service">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/agent_service#Service"/>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.org/agent_service#hasReturn"/>
+                        <owl:qualifiedCardinality rdf:datatype="http://www.w3.org/2001/XMLSchema#nonNegativeInteger">1</owl:qualifiedCardinality>
+                        <owl:onClass rdf:resource="http://example.org/agent_service#Return"/>
+                    </owl:Restriction>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.org/agent_service#hasStep"/>
+                        <owl:someValuesFrom rdf:resource="http://example.org/agent_service#Step"/>
+                    </owl:Restriction>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.org/agent_service#hasHttpMethod"/>
+                        <owl:maxQualifiedCardinality rdf:datatype="http://www.w3.org/2001/XMLSchema#nonNegativeInteger">1</owl:maxQualifiedCardinality>
+                        <owl:onClass rdf:resource="http://example.org/agent_service#HttpMethod"/>
+                    </owl:Restriction>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+
+    <!-- Helper classes for method/body constraints -->
+    <owl:Class rdf:about="http://example.org/agent_service#HttpCallWithBody">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/agent_service#HttpCall"/>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.org/agent_service#usesBody"/>
+                        <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">true</owl:hasValue>
+                    </owl:Restriction>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://example.org/agent_service#HttpCallWithoutBody">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/agent_service#HttpCall"/>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.org/agent_service#usesBody"/>
+                        <owl:hasValue rdf:datatype="http://www.w3.org/2001/XMLSchema#boolean">false</owl:hasValue>
+                    </owl:Restriction>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+
+    <!-- Service typed by method -->
+    <owl:Class rdf:about="http://example.org/agent_service#GET_Service">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/agent_service#Service"/>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.org/agent_service#hasHttpMethod"/>
+                        <owl:someValuesFrom rdf:resource="http://example.org/agent_service#GET"/>
+                    </owl:Restriction>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://example.org/agent_service#POST_Service">
+        <owl:equivalentClass>
+            <owl:Class>
+                <owl:intersectionOf rdf:parseType="Collection">
+                    <rdf:Description rdf:about="http://example.org/agent_service#Service"/>
+                    <owl:Restriction>
+                        <owl:onProperty rdf:resource="http://example.org/agent_service#hasHttpMethod"/>
+                        <owl:someValuesFrom rdf:resource="http://example.org/agent_service#POST"/>
+                    </owl:Restriction>
+                </owl:intersectionOf>
+            </owl:Class>
+        </owl:equivalentClass>
+    </owl:Class>
+
+    <!-- GET services: all HttpCall steps must be without body -->
+    <owl:Class rdf:about="http://example.org/agent_service#GET_Service">
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/agent_service#hasStep"/>
+                <owl:allValuesFrom>
+                    <owl:Class>
+                        <owl:unionOf rdf:parseType="Collection">
+                            <owl:Class>
+                                <owl:complementOf rdf:resource="http://example.org/agent_service#HttpCall"/>
+                            </owl:Class>
+                            <rdf:Description rdf:about="http://example.org/agent_service#HttpCallWithoutBody"/>
+                        </owl:unionOf>
+                    </owl:Class>
+                </owl:allValuesFrom>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+
+    <!-- POST services: all HttpCall steps must be with body -->
+    <owl:Class rdf:about="http://example.org/agent_service#POST_Service">
+        <rdfs:subClassOf>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/agent_service#hasStep"/>
+                <owl:allValuesFrom>
+                    <owl:Class>
+                        <owl:unionOf rdf:parseType="Collection">
+                            <owl:Class>
+                                <owl:complementOf rdf:resource="http://example.org/agent_service#HttpCall"/>
+                            </owl:Class>
+                            <rdf:Description rdf:about="http://example.org/agent_service#HttpCallWithBody"/>
+                        </owl:unionOf>
+                    </owl:Class>
+                </owl:allValuesFrom>
+            </owl:Restriction>
+        </rdfs:subClassOf>
+    </owl:Class>
+
 </rdf:RDF>
