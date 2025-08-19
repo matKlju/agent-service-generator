@@ -1,0 +1,95 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://example.org/agent_service#"
+     xml:base="http://example.org/agent_service"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://example.org/agent_service"/>
+
+    <!-- Object Properties -->
+    <owl:ObjectProperty rdf:about="http://example.org/agent_service#hasStep">
+        <rdfs:domain rdf:resource="http://example.org/agent_service#Service"/>
+        <rdfs:range rdf:resource="http://example.org/agent_service#Step"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="http://example.org/agent_service#hasReturn">
+        <rdfs:domain rdf:resource="http://example.org/agent_service#Service"/>
+        <rdfs:range rdf:resource="http://example.org/agent_service#Return"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="http://example.org/agent_service#hasHttpMethod">
+        <rdfs:domain rdf:resource="http://example.org/agent_service#Service"/>
+        <rdfs:range rdf:resource="http://example.org/agent_service#HttpMethod"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="http://example.org/agent_service#hasViolation">
+        <rdfs:domain rdf:resource="http://example.org/agent_service#Service"/>
+        <rdfs:range rdf:resource="http://example.org/agent_service#ConstraintViolation"/>
+    </owl:ObjectProperty>
+
+    <!-- Data Properties -->
+    <owl:DatatypeProperty rdf:about="http://example.org/agent_service#hasUrl">
+        <rdfs:domain rdf:resource="http://example.org/agent_service#HttpCall"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="http://example.org/agent_service#usesBody">
+        <rdfs:domain rdf:resource="http://example.org/agent_service#HttpCall"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#boolean"/>
+    </owl:DatatypeProperty>
+
+    <!-- Classes -->
+    <owl:Class rdf:about="http://example.org/agent_service#Service"/>
+    <owl:Class rdf:about="http://example.org/agent_service#Step"/>
+    <owl:Class rdf:about="http://example.org/agent_service#Prepare">
+        <rdfs:subClassOf rdf:resource="http://example.org/agent_service#Step"/>
+    </owl:Class>
+    <owl:Class rdf:about="http://example.org/agent_service#Assign">
+        <rdfs:subClassOf rdf:resource="http://example.org/agent_service#Step"/>
+    </owl:Class>
+    <owl:Class rdf:about="http://example.org/agent_service#HttpCall">
+        <rdfs:subClassOf rdf:resource="http://example.org/agent_service#Step"/>
+    </owl:Class>
+    <owl:Class rdf:about="http://example.org/agent_service#Return">
+        <rdfs:subClassOf rdf:resource="http://example.org/agent_service#Step"/>
+    </owl:Class>
+    <owl:Class rdf:about="http://example.org/agent_service#HttpMethod"/>
+    <owl:Class rdf:about="http://example.org/agent_service#GET">
+        <rdfs:subClassOf rdf:resource="http://example.org/agent_service#HttpMethod"/>
+    </owl:Class>
+    <owl:Class rdf:about="http://example.org/agent_service#POST">
+        <rdfs:subClassOf rdf:resource="http://example.org/agent_service#HttpMethod"/>
+    </owl:Class>
+    <owl:Class rdf:about="http://example.org/agent_service#ConstraintViolation"/>
+    <owl:Class rdf:about="http://example.org/agent_service#Valid_Service">
+        <rdfs:subClassOf rdf:resource="http://example.org/agent_service#Service"/>
+    </owl:Class>
+    <owl:Class rdf:about="http://example.org/agent_service#Invalid_Service">
+        <rdfs:subClassOf rdf:resource="http://example.org/agent_service#Service"/>
+    </owl:Class>
+
+    <!-- Axioms (basic, open-world friendly) -->
+    <!-- Every Service must have exactly one Return -->
+    <owl:Class>
+        <owl:intersectionOf rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/agent_service#Service"/>
+            <owl:Restriction>
+                <owl:onProperty rdf:resource="http://example.org/agent_service#hasReturn"/>
+                <owl:qualifiedCardinality rdf:datatype="http://www.w3.org/2001/XMLSchema#nonNegativeInteger">1</owl:qualifiedCardinality>
+                <owl:onClass rdf:resource="http://example.org/agent_service#Return"/>
+            </owl:Restriction>
+        </owl:intersectionOf>
+        <rdfs:subClassOf rdf:resource="http://example.org/agent_service#Valid_Service"/>
+    </owl:Class>
+
+    <!-- GET and POST are disjoint methods -->
+    <rdf:Description rdf:about="http://www.w3.org/2002/07/owl#AllDisjointClasses">
+        <owl:members rdf:parseType="Collection">
+            <rdf:Description rdf:about="http://example.org/agent_service#GET"/>
+            <rdf:Description rdf:about="http://example.org/agent_service#POST"/>
+        </owl:members>
+    </rdf:Description>
+
+</rdf:RDF>
