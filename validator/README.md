@@ -191,3 +191,42 @@ docker run -it --rm agent-service-generator \
 ```
 
 Tip: for new method/body-like constraints, prefer defining helper classes (e.g., `TransformWithScript`) with `hasValue`/`someValuesFrom` restrictions and then constrain services or steps using `allValuesFrom` on `hasStep` as shown above for GET/POST.
+
+### Design guidelines for extending the ontology
+
+- Naming
+  - **Classes**: UpperCamelCase (`Service`, `HttpCall`, `Return`, `Transform`).
+  - **Object properties**: `hasX` / `isXOf` patterns (`hasStep`, `hasReturn`, `hasHttpMethod`).
+  - **Data properties**: verb-noun or `hasX` with a clear datatype (`hasUrl` xsd:string, `usesBody` xsd:boolean, `hasScript` xsd:string).
+
+- Domains and ranges
+  - Always set explicit domain/range for properties; it improves reasoner diagnostics.
+  - Favor specific domains (e.g., `hasUrl` domain `HttpCall`) to avoid accidental inferences.
+
+- Helper classes and patterns
+  - Create boolean “views” as equivalent classes: `HttpCallWithBody ≡ HttpCall ⊓ (usesBody value true)`.
+  - Create role-typed service classes: `GET_Service ≡ Service ⊓ (hasHttpMethod some GET)`.
+  - Constrain via `allValuesFrom` on `hasStep` with unions/complements to express “all HTTP calls in this service satisfy X”.
+
+- Close-world considerations
+  - OWL is open-world; the validator applies `close_world` on selected properties to make reasoning useful for a single DSL file.
+  - If you add new properties that must be “closed,” add them to the `close_world` call in the validator.
+
+- What to keep procedural (don’t force into OWL)
+  - String emptiness/regex, numeric ranges/units.
+  - Step ordering/flow constraints, cross-step dataflow.
+  - Allowlist enforcement and runtime-environment checks.
+  - Complex conditionals that would require SWRL/SHACL; prefer simple Python checks for reliability and performance.
+
+- Modularity and growth
+  - We’re using a single ontology file now; as rules grow, consider splitting into `dsl_core.owl`, `http.owl`, and `validation.owl` and using OWL imports.
+  - Keep core vocabulary stable; place project- or domain-specific rules in a separate module.
+
+- Performance and maintainability
+  - Prefer shallow class hierarchies and simple restrictions over deeply nested intersections.
+  - Avoid excessive `allValuesFrom` chains across many properties; reasoners can slow down on large unions/complements.
+  - Document each added axiom’s intent inline (XML comments) referencing the DSL rule it encodes.
+
+- Testing changes
+  - Add a minimal YAML example that should classify as valid and one that should fail procedurally for each new rule.
+  - Validate via Docker to ensure Java/HermiT environment matches CI/deploy: `docker run ... python -m validator.ontology_validator <file.yml>`.
