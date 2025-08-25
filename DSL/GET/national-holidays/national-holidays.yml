@@ -66,6 +66,7 @@ makeApiCall:
       accept: application/json
     url: https://openholidaysapi.org/PublicHolidays?countryIsoCode=EE&validFrom=${startDate}&validTo=${endDate}
   call: http.get
+  next: checkHolidays
   result: holidays
 return_result:
   return: ${formatMessage.response.body}
