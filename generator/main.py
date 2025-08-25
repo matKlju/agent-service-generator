@@ -1,6 +1,7 @@
 import os
 import json
 import yaml
+import random
 from pathlib import Path
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
@@ -55,14 +56,42 @@ with open("blueprints/system_prompt.txt", "r") as f:
 # Test run
 if __name__ == "__main__":
     print(f"\n📦 Passing this input to the agent:\n{input_json}\n")
+
+    # --- Example Selection Logic ---
+    service_name_slug = input_data['serviceName'].replace(' ', '_').lower()
+    examples_dir = Path("blueprints/examples")
+    
+    # Search for specific examples matching the service name slug in the file path
+    specific_example_pattern = f"**/{service_name_slug}*.yml"
+    example_files = list(examples_dir.glob(specific_example_pattern))
+
+    # If no specific examples are found, grab a few random ones to avoid rate limits
+    if not example_files:
+        print(f"No specific example found for '{service_name_slug}'. Selecting 5 random examples.")
+        all_examples = list(examples_dir.glob("**/*.yml"))
+        random.shuffle(all_examples)
+        example_files = all_examples[:5]
+    else:
+        print(f"Found {len(example_files)} specific example(s) for '{service_name_slug}'.")
+
+    examples_str = "\n" # Start with a newline for better formatting
+    for example_path in example_files:
+        with open(example_path, 'r') as f:
+            content = f.read()
+        
+        examples_str += f"--- EXAMPLE START ---\n"
+        examples_str += f"File: {example_path}\n"
+        examples_str += f"Content:\n{content}\n"
+        examples_str += f"--- EXAMPLE END ---\n\n"
     
     # Manually format the prompt
-    formatted_prompt = prompt_template_str.replace("{input_json}", input_json)
+    prompt_with_examples = prompt_template_str.replace("{examples}", examples_str)
+    formatted_prompt = prompt_with_examples.replace("{input_json}", input_json)
     
     # Create a HumanMessage
     message = HumanMessage(content=formatted_prompt)
     
-    # Invoke tprompt_template_strhe LLM
+    # Invoke the LLM
     result = llm.invoke([message])
     
     # Get the content from the AIMessage
@@ -115,5 +144,12 @@ if __name__ == "__main__":
 
     print("\n🧠 Generated YAML:\n")
     print(final_yaml_str)
+
+    # Save the generated YAML to a file
+    output_filename = f"{service_slug}.yml"
+    output_path = service_dir / output_filename
+    with open(output_path, "w") as f:
+        f.write(final_yaml_str)
+    print(f"✅ Generated YAML service saved to {output_path}")
 
     validate_yaml(final_yaml_str, input_data["serviceName"], input_data["httpMethod"])

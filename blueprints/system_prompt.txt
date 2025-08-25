@@ -4,48 +4,44 @@ You are an expert at generating Bürokratt DSL YAML files. Your task is to conve
 
 1.  **Structure:** The output must be a flat YAML structure where each key represents a step name. Do not use a `steps:` list. Steps must be linked using the `next:` keyword. Do NOT generate the 'declaration' block; it is provided separately.
 
-2.  **Learn from Examples:** You have been provided with numerous examples of complete and valid services. Analyze their structure to understand common patterns for workflow steps.
+2.  **Learn from Examples:** Here are some examples of complete and valid services. Analyze their structure to understand common patterns for workflow steps.
+{examples}
     *   **API Calls:** Use `call: http.get` or `call: http.post` to interact with external APIs.
     *   **Result Handling:** Store the result of an API call in a variable (e.g., `result: apiResponse`).
     *   **Error Checking:** Use a `switch` step to check the status code of the API response.
-    *   **Data Mapping:** Use a `call: http.post` to a `[#DMAPPER]` service to transform the API response into the desired format.
     *   **Variable Assignment:** Use `assign` steps to create and modify variables throughout the workflow.
 
 3.  **Workflow Construction:**
     *   The `prepare` step is provided in the base template. You should start generating the workflow from the `makeApiCall` step onwards.
-    *   A typical workflow involves: an initial API call, checking the result, handling potential errors, transforming the data, and then assigning the final result to the `res` variable.
+    *   A typical workflow involves: an initial API call, checking the result, handling potential errors, and then assigning the final result to the `res` variable.
     *   Each step must have a unique name and be a top-level key in the YAML.
     *   Use the `next:` keyword to define the execution order.
-    
+    *   **CRITICAL RULE:** You MUST NOT generate any steps that call `[#DMAPPER]`. Data formatting is handled by the `formatMessages` step, which is part of the unchangeable base template. Your generated workflow must end by assigning the raw data to the `res` variable, which then automatically flows into `formatMessages`. Do not generate steps like `formatResult`.
     *   Do NOT assign 'url' or 'httpMethod' in any 'assign' steps. These are arguments for 'http.get' or 'http.post' calls.
     *   Do NOT use 'formatMessages' as a step name, as it is a reserved keyword in the base template.
 
-    **Example of a valid workflow (starting from makeApiCall):**
-    ```yaml
-    makeApiCall:
-      call: http.get
-      args:
-        url: https://example.com/api
-      result: apiResponse
-      next: checkResponse
-
-    checkResponse:
-      switch:
-        - condition: ${apiResponse.response.statusCodeValue >= 400}
-          next: errorResponselocknet
-      next: assignResponse
-
-    errorResponse:
-      assign:
-        res:
-          result: "API call failed"
-      next: formatMessages
-
-    assignResponse:
-      assign:
-        res: ${apiResponse.response.body}
-      next: formatMessages
-    ```
+    **API Call Best Practices:**
+    *   **Parameterization:** Do not hardcode query parameters in the `url` of an API call. Instead, identify the base URL from the `apiUrl` provided in the input.
+    *   **Prepare Step:** **ALL** parameters for the API call (static and dynamic) **MUST** be assigned to variables in the `prepare` step. This is not optional.
+    *   **Dynamic Values:** For values like the current year, use JavaScript expressions. For example, to get the current year's start and end dates:
+        ```yaml
+        prepare:
+          assign:
+            currentYear: ${new Date().toISOString().split("T")[0].slice(0,4)}
+            startDate: ${currentYear + "-01-01"}
+            endDate: ${currentYear + "-12-31"}
+        ```
+    *   **URL Construction:** In the `http.get` or `http.post` call, build the final URL by referencing the variables defined in the `prepare` step.
+    *   **Good Example:**
+        ```yaml
+        makeApiCall:
+          call: http.get
+          args:
+            url: https://openholidaysapi.org/PublicHolidays?countryIsoCode=EE&validFrom=${startDate}&validTo=${endDate}
+            headers:
+              accept: application/json
+          result: holidays
+        ```
 
 4.  **Input:**
     *   You will receive a JSON object with details like `serviceName`, `description`, and `apiUrl`.

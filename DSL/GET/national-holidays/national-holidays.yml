@@ -1,0 +1,94 @@
+declaration:
+  call: declare
+  version: 0.1
+  name: "national-holidays"
+  description: "This service fetches all estonian national holoidays for the current year. The api accepts two mandatory parameters - validFrom and validTo. these parameters have to be assigned in the service and should respectively be set to the start and end of the current year.Thes service output should be in form of 'All national holidays for the {currentyear} are: {date} - {holidayName}, etc'"
+  method: "GET"
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+  allowlist:
+    body:
+      - field: chatId
+        type: string
+        description: "The chat ID for the message"
+      - field: authorId
+        type: string
+        description: "The author ID for the message"
+      
+
+prepare:
+  assign:
+    chatId: ${incoming.params.chatId}
+    authorId: ${incoming.params.authorId}
+    serviceInput: ${incoming.params.input}
+        serviceInput: ${incoming.params.serviceInput}
+    currentYear: ${new Date().toISOString().split("T")[0].slice(0,4)}
+    startDate: ${currentYear + "-01-01"}
+    endDate: ${currentYear + "-12-31"}
+
+  next: makeApiCall
+
+assignResponse:
+  assign:
+    res: ${holidays.response.body}
+  next: formatMessages
+checkHolidays:
+  next: assignResponse
+  switch:
+  - condition: ${holidays.response.statusCodeValue >= 400}
+    next: errorResponse
+errorResponse:
+  assign:
+    res:
+      result: Unfortunately, we could not load the holiday data at this time. This
+        may be a temporary technical issue. Please try again later.
+  next: formatMessages
+formatMessages:
+  args:
+    body:
+      data:
+        authorFirstName: ''
+        authorId: ${authorId}
+        authorLastName: ''
+        authorTimestamp: ${new Date().toISOString()}
+        botMessages: ${[res]}
+        chatId: ${chatId}
+        created: ${new Date().toISOString()}
+    headers:
+      type: json
+    url: '[#DMAPPER]/common-services/hbs/bot_responses_to_messages'
+  call: http.post
+  result: formatMessage
+makeApiCall:
+  args:
+    headers:
+      accept: application/json
+    url: https://openholidaysapi.org/PublicHolidays?countryIsoCode=EE&validFrom=${startDate}&validTo=${endDate}
+  call: http.get
+  result: holidays
+return_result:
+  return: ${formatMessage.response.body}
+
+
+formatMessages:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/common-services/hbs/bot_responses_to_messages"
+    headers:
+      type: json
+    body:
+      data:
+        {
+          "botMessages": "${[res]}",
+          "chatId": "${chatId}",
+          "authorId": "${authorId}",
+          "authorFirstName": "",
+          "authorLastName": "",
+          "authorTimestamp": "${new Date().toISOString()}",
+          "created": "${new Date().toISOString()}"
+        }
+  result: formatMessage
+
+return_result:
+  return: ${formatMessage.response.body}

@@ -46,7 +46,7 @@ errorResponse:
 
 assignResponse:
   assign:
-    res: ${apiResponse.response.body}
+    res: ${'Currency rate against EURO is ' + apiResponse.response.body.rates.AUD}
   next: formatMessages
 
 formatMessages:
