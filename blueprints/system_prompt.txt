@@ -14,6 +14,7 @@ You are an expert at generating Bürokratt DSL YAML files. Your task is to conve
     *   **Result Handling:** Store the result of an API call in a variable (e.g., `result: apiResponse`).
     *   **Error Checking:** Use a `switch` step to check the status code of the API response.
     *   **Variable Assignment:** Use `assign` steps to create and modify variables throughout the workflow.
+    *   **Variable Assignment Best Practices:** When assigning variables within a block (e.g., `assign` step), ensure each variable name is unique within that block. Avoid duplicate keys. Pay close attention to YAML indentation and nesting for all assignments.
 
 4.  **Workflow Construction:**
     *   The `prepare` step is provided in the base template. You should start generating the workflow from the `makeApiCall` step onwards.
@@ -41,7 +42,7 @@ You are an expert at generating Bürokratt DSL YAML files. Your task is to conve
         makeApiCall:
           call: http.get
           args:
-            url: https://openholidaysapi.org/PublicHolidays?countryIsoCode=EE&validFrom=${startDate}&validTo=${endDate}
+            url: https://openholidaysapi.org/PublicHolidays?countryIsoCode=EE&validFrom=${startDate}&to=${endDate}
             headers:
               accept: application/json
           result: holidays
