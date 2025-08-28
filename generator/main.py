@@ -124,12 +124,6 @@ def main():
     """Main function to orchestrate the service generation process."""
     logger.info("Starting service generation process...")
 
-    # Load environment and validate API key (already done in run.py, but good to keep here for standalone testing)
-    load_dotenv()
-    if not os.getenv("OPENAI_API_KEY"):
-        logger.critical("OPENAI_API_KEY not found in .env file. Please set it.")
-        raise EnvironmentError("Missing OPENAI_API_KEY in .env file")
-
     # Load data and set up
     input_data = load_input_data(INPUT_JSON_PATH)
     input_json_str = json.dumps(input_data, indent=2)
