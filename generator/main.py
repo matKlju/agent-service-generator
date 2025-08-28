@@ -11,7 +11,8 @@ from langchain_core.messages import HumanMessage
 # Add the project root to the Python path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from generator.yaml_generator import generate_yaml_service, validate_yaml
+from generator.yaml_generator import generate_yaml_service
+from validator.ontology_validator import validate_service_with_ontology
 
 def load_input_data(file_path: str) -> dict:
     """Loads and validates the main input JSON file."""
@@ -66,27 +67,95 @@ def process_llm_response(generated_steps: str, input_data: dict) -> tuple[str, s
     """Cleans, parses, and processes the raw LLM response."""
     # Remove Markdown formatting
     clean_steps = generated_steps.strip().removeprefix("```yaml").removesuffix("```").strip()
-    # Fix the DMAPPER url
+
+    # Fix the DMAPPER url (still needed as LLM might generate it without quotes)
     clean_steps = clean_steps.replace("url: [#DMAPPER]", "url: \"[#DMAPPER]\"")
 
-    parsed_generated_steps = yaml.safe_load(clean_steps)
+    try:
+        parsed_generated_steps = yaml.safe_load(clean_steps)
+    except yaml.YAMLError as e:
+        print("---" + "-" * 25 + " YAML Parsing Error in LLM Output " + "-" * 25 + "---")
+        print(clean_steps)
+        print("----------------------------------------")
+        print(f"Error: {e}")
+        # Attempt a more aggressive cleanup for common LLM YAML errors
+        # This is a heuristic and might not catch all cases
+        fixed_lines = []
+        seen_keys_at_level = {}
+        current_indent = 0
+
+        for line in clean_steps.splitlines():
+            stripped_line = line.strip()
+            if not stripped_line:
+                fixed_lines.append(line)
+                continue
+
+            leading_spaces = len(line) - len(line.lstrip(' '))
+            
+            # Simple re-indentation to 2 spaces
+            if leading_spaces % 2 != 0:
+                leading_spaces = (leading_spaces // 2) * 2
+
+            if ':' in stripped_line:
+                key = stripped_line.split(':', 1)[0].strip()
+                # Track keys at current indentation level
+                if leading_spaces not in seen_keys_at_level:
+                    seen_keys_at_level[leading_spaces] = set()
+                
+                if key in seen_keys_at_level[leading_spaces]:
+                    # Duplicate key at this level, skip it
+                    continue
+                else:
+                    seen_keys_at_level[leading_spaces].add(key)
+            
+            fixed_lines.append(' ' * leading_spaces + stripped_line)
+        
+        clean_steps = "\n".join(fixed_lines)
+        print("---" + "-" * 25 + " Attempted YAML Fix " + "-" * 25 + "---")
+        print(clean_steps)
+        print("--------------------------")
+        try:
+            parsed_generated_steps = yaml.safe_load(clean_steps)
+        except yaml.YAMLError as e_fixed:
+            print("---" + "-" * 25 + " YAML Fix Failed " + "-" * 25 + "---")
+            print(f"Error after fix attempt: {e_fixed}")
+            # In a real application, you might want to log this or handle it differently
+            # For this example, we'll exit, but a more robust solution would be needed.
+            import sys
+            sys.exit(1) # Exit if even aggressive fix fails
+
     llm_generated_prepare_assignments = ""
+
+    # Remove formatMessages and return_result if LLM generated them, as they are in the base template
+    if "formatMessages" in parsed_generated_steps:
+        del parsed_generated_steps["formatMessages"]
+    if "return_result" in parsed_generated_steps:
+        del parsed_generated_steps["return_result"]
 
     if "prepare" in parsed_generated_steps:
         if "assign" in parsed_generated_steps["prepare"]:
             unwanted_keys = ["url", "httpMethod", "input", "serviceInput"]
-            if "serviceInput" in input_data:
-                llm_generated_prepare_assignments += "    serviceInput: $" + "{incoming.params.serviceInput}\n"
-
-            for key, value in parsed_generated_steps["prepare"]["assign"].items():
+            
+            # Use a dictionary to automatically handle duplicate keys (last one wins)
+            # Then re-serialize to ensure correct YAML for prepare.assign
+            temp_assign_dict = {}
+            for key, value in parsed_generated_steps["prepare"].get("assign", {}).items():
                 if key not in unwanted_keys:
-                    cleaned_value = str(value).strip()
-                    llm_generated_prepare_assignments += f'    {key}: {cleaned_value}\n'
-        
+                    temp_assign_dict[key] = value
+            
+            # Manually construct the prepare assignments string with 2-space indent
+            for key, value in temp_assign_dict.items():
+                cleaned_value = str(value).strip()
+                llm_generated_prepare_assignments += f'    {key}: {cleaned_value}\n'
+            
+            if "serviceInput" in input_data:
+                llm_generated_prepare_assignments += "    serviceInput: $" + "{{incoming.params.serviceInput}}\n"
+
         del parsed_generated_steps["prepare"]
         clean_steps = yaml.dump(parsed_generated_steps, indent=2, default_flow_style=False)
 
     return clean_steps, llm_generated_prepare_assignments
+
 
 def save_generated_files(input_data: dict, input_json_str: str, final_yaml_str: str):
     """Saves the input JSON and final generated YAML to the DSL directory."""
@@ -137,7 +206,15 @@ def main():
     print(final_yaml_str)
 
     save_generated_files(input_data, input_json_str, final_yaml_str)
-    validate_yaml(final_yaml_str, input_data["serviceName"], input_data["httpMethod"])
+
+    validation_result = validate_service_with_ontology(final_yaml_str)
+    if not validation_result["valid"]:
+        print("❌ Generated YAML failed ontology validation:")
+        for violation in validation_result["violations"]:
+            print(f"  - {violation}")
+        sys.exit(1)
+    else:
+        print("✅ Generated YAML passed ontology validation.")
 
 if __name__ == "__main__":
     main()
