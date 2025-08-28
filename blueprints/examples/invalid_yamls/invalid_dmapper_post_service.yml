@@ -1,0 +1,17 @@
+declaration:
+  call: declare
+  version: 0.1
+  description: "Invalid service: another POST to DMAPPER."
+  method: "POST"
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+
+another_dmapper_post:
+  call: http.post
+  args:
+    url: "[#DMAPPER]/another/path"
+    body: {}
+
+return_result:
+  return: "ok"

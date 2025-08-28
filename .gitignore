@@ -1,4 +1,6 @@
 DSL/
+commit_message.txt
+
 
 # Environments
 .env

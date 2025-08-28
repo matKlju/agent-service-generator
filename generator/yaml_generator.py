@@ -1,9 +1,10 @@
 import yaml
 from pathlib import Path
 
+from config import BASE_TEMPLATE_PATH
 
 def generate_yaml_service(input_data, clean_steps, llm_generated_prepare_assignments):
-    with open("blueprints/base_template.yaml", "r") as f:
+    with open(BASE_TEMPLATE_PATH, "r") as f:
         base_template = f.read()
 
     # Replace placeholders

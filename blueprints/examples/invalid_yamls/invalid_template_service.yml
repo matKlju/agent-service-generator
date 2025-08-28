@@ -1,0 +1,14 @@
+declaration:
+  call: declare
+  version: 0.1
+  description: "This is an invalid service for testing template validation."
+  method: "GET"
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+
+call_template:
+  template: some_template
+
+return_result:
+  return: ${a}

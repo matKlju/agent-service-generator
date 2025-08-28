@@ -1,0 +1,16 @@
+declaration:
+  call: declare
+  version: 0.1
+  description: "Invalid service: GET to DMAPPER."
+  method: "GET"
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+
+get_dmapper:
+  call: http.get
+  args:
+    url: "[#DMAPPER]/some/path"
+
+return_result:
+  return: "ok"
