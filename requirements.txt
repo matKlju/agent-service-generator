@@ -16,6 +16,7 @@ langchain-openai==0.3.29
 langsmith==0.4.13
 openai==1.99.6
 orjson==3.11.1
+owlready2==0.48
 packaging==25.0
 pydantic==2.11.7
 pydantic_core==2.33.2
