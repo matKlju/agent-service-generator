@@ -1,0 +1,8 @@
+{
+  "serviceName": "national-holidays",
+  "description": "This service fetches all estonian national holoidays for the current year. The api accepts two mandatory parameters - validFrom and validTo. these parameters have to be assigned in the service and should respectively be set to the start and end of the current year.Thes service output should be in form of 'All national holidays for the {currentyear} are: {date} - {holidayName}, etc'",
+  "apiUrl": "https://openholidaysapi.org/PublicHolidays?countryIsoCode=EE&validFrom=2025-01-01&validTo=2025-12-31",
+  "httpMethod": "GET",
+  "serviceInput": "AUD",
+  "additionalParams": ""
+}

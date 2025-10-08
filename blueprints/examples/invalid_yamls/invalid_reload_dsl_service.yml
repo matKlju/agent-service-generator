@@ -1,0 +1,14 @@
+declaration:
+  call: declare
+  version: 0.1
+  description: "This is an invalid service for testing reloadDsl validation."
+  method: "GET"
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+
+step_1:
+  reloadDsl: "not a boolean"
+
+return_result:
+  return: ${a}

@@ -1,0 +1,15 @@
+declaration:
+  call: declare
+  version: 0.1
+  description: "This is an invalid service for testing mock validation."
+  method: "GET"
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+
+mock_step:
+  call: reflect.mock
+  args: {}
+
+return_result:
+  return: ${a}

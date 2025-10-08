@@ -1,0 +1,15 @@
+declaration:
+  call: declare
+  version: 0.1
+  description: "This is an invalid service for testing skip and sleep validation."
+  method: "GET"
+  accepts: JSON
+  returns: JSON
+  namespace: common-services
+
+step_1:
+  skip: "not a boolean"
+  sleep: "not an integer"
+
+return_result:
+  return: ${a}
