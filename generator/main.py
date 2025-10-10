@@ -1,7 +1,6 @@
 import os
 import json
 import sys
-import yaml
 import random
 import logging
 from pathlib import Path
@@ -13,7 +12,13 @@ from config import *
 
 from generator.yaml_generator import generate_yaml_service
 from validator.ontology_validator import validate_service_with_ontology
-from generator.yaml_processor import clean_and_parse_llm_yaml, extract_and_process_prepare_assignments, remove_base_template_sections
+from generator.yaml_processor import (
+    clean_and_parse_llm_yaml,
+    extract_and_process_prepare_assignments,
+    remove_base_template_sections,
+    format_workflow_steps,
+    sanitize_http_calls,
+)
 
 # Get the logger for this module
 logger = logging.getLogger(__name__)
@@ -83,8 +88,9 @@ def process_llm_response(generated_steps: str, input_data: dict) -> tuple[str, s
     parsed_generated_steps = clean_and_parse_llm_yaml(generated_steps)
     llm_generated_prepare_assignments = extract_and_process_prepare_assignments(parsed_generated_steps, input_data)
     parsed_generated_steps = remove_base_template_sections(parsed_generated_steps)
+    parsed_generated_steps = sanitize_http_calls(parsed_generated_steps)
 
-    clean_steps = yaml.dump(parsed_generated_steps, indent=2, default_flow_style=False)
+    clean_steps = format_workflow_steps(parsed_generated_steps)
     logger.info("LLM response processed.")
     return clean_steps, llm_generated_prepare_assignments
 

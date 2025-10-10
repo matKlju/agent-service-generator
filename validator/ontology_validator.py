@@ -10,6 +10,7 @@ This module is standalone and does not modify existing project files.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -91,6 +92,200 @@ def _load_ontology(ontology_dir: Path) -> Any:
     return onto
 
 
+CLASS_NAMES = [
+    "Service",
+    "Step",
+    "HttpCall",
+    "Return",
+    "Declaration",
+    "Template",
+    "Assign",
+    "Switch",
+    "SwitchCase",
+    "Mock",
+    "FormatMessages",
+    "DmapperHttpCall",
+    "GET",
+    "POST",
+    "ConstraintViolation",
+]
+
+PROPERTY_NAMES = [
+    "hasStep",
+    "hasReturn",
+    "hasHttpMethod",
+    "hasUrl",
+    "usesBody",
+    "hasViolation",
+    "hasDeclaration",
+    "hasVersion",
+    "hasDescription",
+    "hasAccepts",
+    "hasReturns",
+    "hasNamespace",
+    "hasTemplate",
+    "hasRequestType",
+    "hasResult",
+    "hasSwitch",
+    "hasNext",
+    "hasResponse",
+    "canBeSkipped",
+    "canSleep",
+    "canReloadDsl",
+]
+
+
+def _resolve_ontology_references(onto: Any) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Resolve required ontology classes and properties, raising if any are missing."""
+    missing: List[str] = []
+    class_refs: Dict[str, Any] = {}
+    property_refs: Dict[str, Any] = {}
+
+    for name in CLASS_NAMES:
+        entity = getattr(onto, name, None)
+        if entity is None:
+            missing.append(name)
+        else:
+            class_refs[name] = entity
+
+    for name in PROPERTY_NAMES:
+        entity = getattr(onto, name, None)
+        if entity is None:
+            missing.append(name)
+        else:
+            property_refs[name] = entity
+
+    if missing:
+        missing_list = ", ".join(sorted(missing))
+        raise OntologyValidationError(
+            f"Ontology classes/properties missing. Ensure agent_service.owl is intact. Missing: {missing_list}"
+        )
+
+    return class_refs, property_refs
+
+
+def _build_service_individual(
+    onto: Any,
+    class_refs: Dict[str, Any],
+    service_name: str,
+    declaration: Dict[str, Any],
+    method_str: str,
+    steps: Dict[str, Any],
+    has_return: bool,
+    violations: List[str],
+) -> Any:
+    """Create and populate the service individual with steps, declaration, and violations."""
+    Service = class_refs["Service"]
+    DeclarationClass = class_refs["Declaration"]
+    TemplateClass = class_refs["Template"]
+    AssignClass = class_refs["Assign"]
+    SwitchClass = class_refs["Switch"]
+    SwitchCaseClass = class_refs["SwitchCase"]
+    MockClass = class_refs["Mock"]
+    StepClass = class_refs["Step"]
+    HttpCall = class_refs["HttpCall"]
+    DmapperHttpCallClass = class_refs["DmapperHttpCall"]
+    ReturnClass = class_refs["Return"]
+    GETClass = class_refs["GET"]
+    POSTClass = class_refs["POST"]
+    ConstraintViolation = class_refs["ConstraintViolation"]
+
+    service_ind = Service(service_name, namespace=onto)
+
+    if declaration:
+        declaration_ind = DeclarationClass(f"{service_name}_declaration", namespace=onto)
+        service_ind.hasDeclaration.append(declaration_ind)
+        if declaration.get("version"):
+            declaration_ind.hasVersion.append(declaration.get("version"))
+        if declaration.get("description"):
+            declaration_ind.hasDescription.append(declaration.get("description"))
+        if declaration.get("accepts"):
+            declaration_ind.hasAccepts.append(declaration.get("accepts"))
+        if declaration.get("returns"):
+            declaration_ind.hasReturns.append(declaration.get("returns"))
+        if declaration.get("namespace"):
+            declaration_ind.hasNamespace.append(declaration.get("namespace"))
+
+    if method_str == "GET":
+        method_ind = GETClass(f"{service_name}_method", namespace=onto)
+        service_ind.hasHttpMethod.append(method_ind)
+    elif method_str == "POST":
+        method_ind = POSTClass(f"{service_name}_method", namespace=onto)
+        service_ind.hasHttpMethod.append(method_ind)
+
+    for step_name, step_body in steps.items():
+        step_data = step_body if isinstance(step_body, dict) else {}
+
+        if "template" in step_data:
+            step_ind = TemplateClass(step_name, namespace=onto)
+            if step_data.get("template"):
+                step_ind.hasTemplate.append(step_data.get("template"))
+            if step_data.get("requestType"):
+                step_ind.hasRequestType.append(step_data.get("requestType"))
+            if step_data.get("result"):
+                step_ind.hasResult.append(step_data.get("result"))
+        elif "assign" in step_data:
+            step_ind = AssignClass(step_name, namespace=onto)
+        elif "switch" in step_data:
+            step_ind = SwitchClass(step_name, namespace=onto)
+            switch_cases = step_data.get("switch")
+            if isinstance(switch_cases, list):
+                for i, _ in enumerate(switch_cases):
+                    case_ind = SwitchCaseClass(f"{step_name}_case_{i}", namespace=onto)
+                    step_ind.hasSwitch.append(case_ind)
+        elif step_data.get("call") == "reflect.mock":
+            step_ind = MockClass(step_name, namespace=onto)
+            response = step_data.get("args", {}).get("response")
+            if response is not None:
+                step_ind.hasResponse.append(str(response))
+        else:
+            call_val = step_data.get("call")
+            is_http = isinstance(call_val, str) and call_val in ("http.get", "http.post")
+            if is_http:
+                call_payload: Dict[str, Any] = step_data.get("args") or {}
+                url_val = call_payload.get("url")
+                if isinstance(url_val, str) and "[#DMAPPER]" in url_val:
+                    step_ind = DmapperHttpCallClass(step_name, namespace=onto)
+                else:
+                    step_ind = HttpCall(step_name, namespace=onto)
+                if isinstance(url_val, str) and url_val.strip():
+                    step_ind.hasUrl = [url_val]
+                uses_body = False
+                if isinstance(call_payload, dict):
+                    if "body" in call_payload or "plaintext" in call_payload:
+                        uses_body = True
+                    ct = call_payload.get("contentType")
+                    if isinstance(ct, str) and ct.lower() in ("formdata", "plaintext"):
+                        uses_body = True
+                step_ind.usesBody = [bool(uses_body)]
+            else:
+                step_ind = StepClass(step_name, namespace=onto)
+
+        if isinstance(step_data, dict):
+            skip_val = step_data.get("skip")
+            if skip_val is not None:
+                step_ind.canBeSkipped.append(skip_val)
+            sleep_val = step_data.get("sleep")
+            if sleep_val is not None:
+                step_ind.canSleep.append(sleep_val)
+            reload_val = step_data.get("reloadDsl")
+            if reload_val is not None:
+                step_ind.canReloadDsl.append(reload_val)
+
+        service_ind.hasStep.append(step_ind)
+
+    if has_return:
+        ret_ind = ReturnClass(f"{service_name}_return", namespace=onto)
+        service_ind.hasReturn.append(ret_ind)
+
+    for idx, msg in enumerate(violations, start=1):
+        violation_ind = ConstraintViolation(f"{service_name}_violation_{idx}", namespace=onto)
+        violation_ind.label = [msg]
+        service_ind.hasViolation.append(violation_ind)
+
+    return service_ind
+
+
 def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = None) -> Dict[str, Any]:
     """Validate a service YAML using the ontology and simple procedural checks.
 
@@ -103,7 +298,6 @@ def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = N
     if not isinstance(parsed, dict):
         raise OntologyValidationError("Top-level YAML must be a mapping/dict")
 
-    # Extract essentials
     declaration = parsed.get("declaration", {}) or {}
     service_name: str = declaration.get("name") or "unnamed_service"
     method_str: str = (
@@ -112,7 +306,7 @@ def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = N
         or declaration.get("method")
         or ""
     ).upper()
-    # Newer DSLs keep steps at the top-level; fall back to 'steps' if present
+
     steps = parsed.get("steps") or {}
     if not isinstance(steps, dict) or not steps:
         steps = _extract_steps(parsed)
@@ -120,7 +314,6 @@ def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = N
     http_calls = _collect_http_calls(steps)
     has_return = _find_return_step(parsed)
 
-    # Procedural violations (explicit and user-friendly)
     violations: List[str] = []
     if not declaration:
         violations.append("No 'declaration' block found")
@@ -138,6 +331,8 @@ def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = N
         violations.append("Declaration is missing 'namespace' field")
 
     for step_name, step_body in steps.items():
+        if not isinstance(step_body, dict):
+            continue
         if "template" in step_body:
             if "requestType" not in step_body:
                 violations.append(f"Template step '{step_name}' is missing 'requestType' field")
@@ -162,395 +357,74 @@ def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = N
         url = payload.get("url")
         if not isinstance(url, str) or not url.strip():
             violations.append(f"Step '{step_name}' missing or empty url")
-        if "[#DMAPPER]" in url and call_type != "http.post":
+        if isinstance(url, str) and "[#DMAPPER]" in url and call_type != "http.post":
             violations.append(f"Step '{step_name}' is an HTTP GET call to DMAPPER, which is not allowed.")
-        if "[#DMAPPER]" in url and call_type == "http.post" and step_name != "formatMessages":
+        if isinstance(url, str) and "[#DMAPPER]" in url and call_type == "http.post" and step_name != "formatMessages":
             violations.append(f"Step '{step_name}' is an HTTP POST call to DMAPPER, but it is not the formatMessages step.")
-        # GET step may not define a body
+        if isinstance(url, str) and "${serviceInput}" in url:
+            violations.append(f"Step '{step_name}' should not embed 'serviceInput' directly in the request URL.")
         if call_type == "http.get" and ("body" in payload or "plaintext" in payload):
             violations.append(f"GET step '{step_name}' should not define a body")
-        # POST step should define a body (or plaintext)
         if call_type == "http.post" and ("body" not in payload and "plaintext" not in payload):
             violations.append(f"POST step '{step_name}' should define a body or plaintext")
+        query_payload = payload.get("query")
+        if isinstance(query_payload, dict):
+            for key, value in query_payload.items():
+                if isinstance(value, str) and "${serviceInput}" in value:
+                    violations.append(f"Query parameter '{key}' in step '{step_name}' should not reference 'serviceInput'.")
 
-    # If ontology_dir unspecified, resolve default location
+    # Formatting checks
+    for idx, line in enumerate(yaml_text.splitlines(), start=1):
+        if line.strip() == "" and line != "":
+            violations.append(f"Line {idx} contains whitespace-only characters; remove the stray spaces.")
+
+    ordered_step_names = list(steps.keys())
+    for step_name in ordered_step_names[1:]:
+        if not re.search(rf"\n\n{re.escape(step_name)}:", yaml_text):
+            violations.append(f"Step '{step_name}' should be separated from the previous step by an empty line.")
+
+    prepare_block = parsed.get("prepare") or {}
+    prepare_assign = prepare_block.get("assign") if isinstance(prepare_block, dict) else {}
+    if not isinstance(prepare_assign, dict):
+        prepare_assign = {}
+
+    uses_api_url_variable = any("${apiUrl}" in str(step_body) for step_body in steps.values())
+    if uses_api_url_variable and "apiUrl" not in prepare_assign:
+        violations.append("The workflow references '${apiUrl}' but no 'apiUrl' value is assigned in the prepare block.")
+
     if ontology_dir is None:
         ontology_dir = Path(__file__).resolve().parent.parent / "ontology"
 
-    # Load ontology and build individuals
     onto = _load_ontology(ontology_dir)
+    class_refs, property_refs = _resolve_ontology_references(onto)
+    service_ind = _build_service_individual(
+        onto=onto,
+        class_refs=class_refs,
+        service_name=service_name,
+        declaration=declaration,
+        method_str=method_str,
+        steps=steps,
+        has_return=has_return,
+        violations=violations,
+    )
 
-    # Resolve entities by exact name to avoid wildcard collisions (e.g., Return vs hasReturn)
-    Service = onto["Service"]
-    Step = onto["Step"]
-    HttpCall = onto["HttpCall"]
-    ReturnClass = onto["Return"]
-    DeclarationClass = onto["Declaration"]
-    TemplateClass = onto["Template"]
-    AssignClass = onto["Assign"]
-    SwitchClass = onto["Switch"]
-    SwitchCaseClass = onto["SwitchCase"]
-    MockClass = onto["Mock"]
-    Service = onto["Service"]
-    Step = onto["Step"]
-    HttpCall = onto["HttpCall"]
-    ReturnClass = onto["Return"]
-    DeclarationClass = onto["Declaration"]
-    TemplateClass = onto["Template"]
-    AssignClass = onto["Assign"]
-    SwitchClass = onto["Switch"]
-    SwitchCaseClass = onto["SwitchCase"]
-    MockClass = onto["Mock"]
-    FormatMessagesClass = onto["FormatMessages"]
-    DmapperHttpCallClass = onto["DmapperHttpCall"]
-    GETClass = onto["GET"]
-    POSTClass = onto["POST"]
-    ConstraintViolation = onto["ConstraintViolation"]
+    close_world(
+        service_ind,
+        Properties=[
+            property_refs["hasDeclaration"],
+            property_refs["hasReturn"],
+            property_refs["hasStep"],
+            property_refs["hasHttpMethod"],
+        ],
+        recursive=True,
+    )
 
-    hasStep = onto["hasStep"]
-    hasReturn = onto["hasReturn"]
-    hasHttpMethod = onto["hasHttpMethod"]
-    hasUrl = onto["hasUrl"]
-    usesBody = onto["usesBody"]
-    hasViolation = onto["hasViolation"]
-    hasDeclaration = onto["hasDeclaration"]
-    hasVersion = onto["hasVersion"]
-    hasDescription = onto["hasDescription"]
-    hasAccepts = onto["hasAccepts"]
-    hasReturns = onto["hasReturns"]
-    hasNamespace = onto["hasNamespace"]
-    hasTemplate = onto["hasTemplate"]
-    hasRequestType = onto["hasRequestType"]
-    hasResult = onto["hasResult"]
-    hasSwitch = onto["hasSwitch"]
-    hasNext = onto["hasNext"]
-    hasResponse = onto["hasResponse"]
-    canBeSkipped = onto["canBeSkipped"]
-    canSleep = onto["canSleep"]
-    canReloadDsl = onto["canReloadDsl"]
-
-    if not all([
-        Service,
-        Step,
-        HttpCall,
-        ReturnClass,
-        DeclarationClass,
-        TemplateClass,
-        AssignClass,
-        SwitchClass,
-        SwitchCaseClass,
-        MockClass,
-        FormatMessagesClass,
-        DmapperHttpCallClass,
-        GETClass,
-        POSTClass,
-        ConstraintViolation,
-        hasStep,
-        hasReturn,
-        hasHttpMethod,
-        hasUrl,
-        usesBody,
-        hasViolation,
-        hasDeclaration,
-        hasVersion,
-        hasDescription,
-        hasAccepts,
-        hasReturns,
-        hasNamespace,
-        hasTemplate,
-        hasRequestType,
-        hasResult,
-        hasSwitch,
-        hasNext,
-        hasResponse,
-        canBeSkipped,
-        canSleep,
-        canReloadDsl,
-    ]):
-        raise OntologyValidationError("Ontology classes/properties missing. Ensure agent_service.owl is intact.")
-
-    # Create a service individual
-    service_ind = Service(service_name, namespace=onto)
-
-    # Create and attach declaration
-    if declaration:
-        declaration_ind = DeclarationClass(f"{service_name}_declaration", namespace=onto)
-        service_ind.hasDeclaration.append(declaration_ind)
-        if declaration.get("version"):
-            declaration_ind.hasVersion.append(declaration.get("version"))
-        if declaration.get("description"):
-            declaration_ind.hasDescription.append(declaration.get("description"))
-        if declaration.get("accepts"):
-            declaration_ind.hasAccepts.append(declaration.get("accepts"))
-        if declaration.get("returns"):
-            declaration_ind.hasReturns.append(declaration.get("returns"))
-        if declaration.get("namespace"):
-            declaration_ind.hasNamespace.append(declaration.get("namespace"))
-
-    # Attach method
-    if method_str == "GET":
-        method_ind = GETClass(f"{service_name}_method", namespace=onto)  # class-as-individual pattern
-        service_ind.hasHttpMethod.append(method_ind)
-    elif method_str == "POST":
-        method_ind = POSTClass(f"{service_name}_method", namespace=onto)
-        service_ind.hasHttpMethod.append(method_ind)
-
-    # Create steps
-    # Represent each YAML step as a Step individual. HTTP steps as HttpCall; if return found, add a Return individual.
-    # Also bind data properties (url, usesBody) for calls.
-    for step_name, step_body in steps.items():
-        step_ind = None
-        if isinstance(step_body, dict):
-            if "template" in step_body:
-                step_ind = TemplateClass(step_name, namespace=onto)
-                if step_body.get("template"):
-                    step_ind.hasTemplate.append(step_body.get("template"))
-                if step_body.get("requestType"):
-                    step_ind.hasRequestType.append(step_body.get("requestType"))
-                if step_body.get("result"):
-                    step_ind.hasResult.append(step_body.get("result"))
-            elif "assign" in step_body:
-                step_ind = AssignClass(step_name, namespace=onto)
-            elif "switch" in step_body:
-                step_ind = SwitchClass(step_name, namespace=onto)
-                if isinstance(step_body.get("switch"), list):
-                    for i, case in enumerate(step_body.get("switch")):
-                        case_ind = SwitchCaseClass(f"{step_name}_case_{i}", namespace=onto)
-                        step_ind.hasSwitch.append(case_ind)
-                if step_body.get("next"):
-                    # This is a simplification, we are not resolving the actual step reference here
-                    pass
-            elif step_body.get("call") == "reflect.mock":
-                step_ind = MockClass(step_name, namespace=onto)
-                if step_body.get("args", {}).get("response"):
-                    step_ind.hasResponse.append(str(step_body.get("args", {}).get("response")))
-            else:
-                call_val = step_body.get("call")
-                is_http = isinstance(call_val, str) and call_val in ("http.get", "http.post")
-                if is_http:
-                    call_payload: Dict[str, Any] = step_body.get("args") or {}
-                    url_val = call_payload.get("url")
-                    if "[#DMAPPER]" in url_val:
-                        step_ind = DmapperHttpCallClass(step_name, namespace=onto)
-                    else:
-                        step_ind = HttpCall(step_name, namespace=onto)
-                    if isinstance(url_val, str) and url_val.strip():
-                        step_ind.hasUrl = [url_val]
-                    # Body presence signals
-                    uses_body = False
-                    if isinstance(call_payload, dict):
-                        if "body" in call_payload or "plaintext" in call_payload:
-                            uses_body = True
-                        ct = call_payload.get("contentType")
-                        if isinstance(ct, str) and ct.lower() in ("formdata", "plaintext"):
-                            uses_body = True
-                    step_ind.usesBody = [True if uses_body else False]
-                else:
-                    step_ind = Step(step_name, namespace=onto)
-        else:
-            step_ind = Step(step_name, namespace=onto)
-
-        if step_body.get("skip"):
-            step_ind.canBeSkipped.append(step_body.get("skip"))
-        if step_body.get("sleep"):
-            step_ind.canSleep.append(step_body.get("sleep"))
-        if step_body.get("reloadDsl"):
-            step_ind.canReloadDsl.append(step_body.get("reloadDsl"))
-
-        service_ind.hasStep.append(step_ind)
-
-    if has_return:
-        ret_ind = ReturnClass(f"{service_name}_return", namespace=onto)
-        service_ind.hasReturn.append(ret_ind)
-
-    # Encode procedural violations into ontology as ConstraintViolation individuals
-    for idx, msg in enumerate(violations, start=1):
-        v = ConstraintViolation(f"{service_name}_violation_{idx}", namespace=onto)
-        # Owlready2 does not natively support free-text annotations on individuals without property; we attach via rdfs:label
-        v.label = [msg]
-        service_ind.hasViolation.append(v)
-
-    # Close world for key properties to help the reasoner
-    close_world(service_ind, Properties=[hasDeclaration, hasReturn, hasStep, hasHttpMethod], recursive=True)
-    GETClass = onto["GET"]
-    POSTClass = onto["POST"]
-    ConstraintViolation = onto["ConstraintViolation"]
-
-    hasStep = onto["hasStep"]
-    hasReturn = onto["hasReturn"]
-    hasHttpMethod = onto["hasHttpMethod"]
-    hasUrl = onto["hasUrl"]
-    usesBody = onto["usesBody"]
-    hasViolation = onto["hasViolation"]
-    hasDeclaration = onto["hasDeclaration"]
-    hasVersion = onto["hasVersion"]
-    hasDescription = onto["hasDescription"]
-    hasAccepts = onto["hasAccepts"]
-    hasReturns = onto["hasReturns"]
-    hasNamespace = onto["hasNamespace"]
-    hasTemplate = onto["hasTemplate"]
-    hasRequestType = onto["hasRequestType"]
-    hasResult = onto["hasResult"]
-    hasSwitch = onto["hasSwitch"]
-    hasNext = onto["hasNext"]
-    hasResponse = onto["hasResponse"]
-    canBeSkipped = onto["canBeSkipped"]
-    canSleep = onto["canSleep"]
-    canReloadDsl = onto["canReloadDsl"]
-
-    if not all([
-        Service,
-        Step,
-        HttpCall,
-        ReturnClass,
-        DeclarationClass,
-        TemplateClass,
-        AssignClass,
-        SwitchClass,
-        SwitchCaseClass,
-        MockClass,
-        FormatMessagesClass,
-        DmapperHttpCallClass,
-        GETClass,
-        POSTClass,
-        ConstraintViolation,
-        hasStep,
-        hasReturn,
-        hasHttpMethod,
-        hasUrl,
-        usesBody,
-        hasViolation,
-        hasDeclaration,
-        hasVersion,
-        hasDescription,
-        hasAccepts,
-        hasReturns,
-        hasNamespace,
-        hasTemplate,
-        hasRequestType,
-        hasResult,
-        hasSwitch,
-        hasNext,
-        hasResponse,
-        canBeSkipped,
-        canSleep,
-        canReloadDsl,
-    ]):
-        raise OntologyValidationError("Ontology classes/properties missing. Ensure agent_service.owl is intact.")
-
-    # Create a service individual
-    service_ind = Service(service_name, namespace=onto)
-
-    # Create and attach declaration
-    if declaration:
-        declaration_ind = DeclarationClass(f"{service_name}_declaration", namespace=onto)
-        service_ind.hasDeclaration.append(declaration_ind)
-        if declaration.get("version"):
-            declaration_ind.hasVersion.append(declaration.get("version"))
-        if declaration.get("description"):
-            declaration_ind.hasDescription.append(declaration.get("description"))
-        if declaration.get("accepts"):
-            declaration_ind.hasAccepts.append(declaration.get("accepts"))
-        if declaration.get("returns"):
-            declaration_ind.hasReturns.append(declaration.get("returns"))
-        if declaration.get("namespace"):
-            declaration_ind.hasNamespace.append(declaration.get("namespace"))
-
-    # Attach method
-    if method_str == "GET":
-        method_ind = GETClass(f"{service_name}_method", namespace=onto)  # class-as-individual pattern
-        service_ind.hasHttpMethod.append(method_ind)
-    elif method_str == "POST":
-        method_ind = POSTClass(f"{service_name}_method", namespace=onto)
-        service_ind.hasHttpMethod.append(method_ind)
-
-    # Create steps
-    # Represent each YAML step as a Step individual. HTTP steps as HttpCall; if return found, add a Return individual.
-    # Also bind data properties (url, usesBody) for calls.
-    for step_name, step_body in steps.items():
-        step_ind = None
-        if isinstance(step_body, dict):
-            if "template" in step_body:
-                step_ind = TemplateClass(step_name, namespace=onto)
-                if step_body.get("template"):
-                    step_ind.hasTemplate.append(step_body.get("template"))
-                if step_body.get("requestType"):
-                    step_ind.hasRequestType.append(step_body.get("requestType"))
-                if step_body.get("result"):
-                    step_ind.hasResult.append(step_body.get("result"))
-            elif "assign" in step_body:
-                step_ind = AssignClass(step_name, namespace=onto)
-            elif "switch" in step_body:
-                step_ind = SwitchClass(step_name, namespace=onto)
-                if isinstance(step_body.get("switch"), list):
-                    for i, case in enumerate(step_body.get("switch")):
-                        case_ind = SwitchCaseClass(f"{step_name}_case_{i}", namespace=onto)
-                        step_ind.hasSwitch.append(case_ind)
-                if step_body.get("next"):
-                    # This is a simplification, we are not resolving the actual step reference here
-                    pass
-            elif step_body.get("call") == "reflect.mock":
-                step_ind = MockClass(step_name, namespace=onto)
-                if step_body.get("args", {}).get("response"):
-                    step_ind.hasResponse.append(str(step_body.get("args", {}).get("response")))
-            else:
-                call_val = step_body.get("call")
-                is_http = isinstance(call_val, str) and call_val in ("http.get", "http.post")
-                if is_http:
-                    call_payload: Dict[str, Any] = step_body.get("args") or {}
-                    url_val = call_payload.get("url")
-                    if "[#DMAPPER]" in url_val:
-                        step_ind = DmapperHttpCallClass(step_name, namespace=onto)
-                    else:
-                        step_ind = HttpCall(step_name, namespace=onto)
-                    if isinstance(url_val, str) and url_val.strip():
-                        step_ind.hasUrl = [url_val]
-                    # Body presence signals
-                    uses_body = False
-                    if isinstance(call_payload, dict):
-                        if "body" in call_payload or "plaintext" in call_payload:
-                            uses_body = True
-                        ct = call_payload.get("contentType")
-                        if isinstance(ct, str) and ct.lower() in ("formdata", "plaintext"):
-                            uses_body = True
-                    step_ind.usesBody = [True if uses_body else False]
-                else:
-                    step_ind = Step(step_name, namespace=onto)
-        else:
-            step_ind = Step(step_name, namespace=onto)
-
-        if step_body.get("skip"):
-            step_ind.canBeSkipped.append(step_body.get("skip"))
-        if step_body.get("sleep"):
-            step_ind.canSleep.append(step_body.get("sleep"))
-        if step_body.get("reloadDsl"):
-            step_ind.canReloadDsl.append(step_body.get("reloadDsl"))
-
-        service_ind.hasStep.append(step_ind)
-
-    if has_return:
-        ret_ind = ReturnClass(f"{service_name}_return", namespace=onto)
-        service_ind.hasReturn.append(ret_ind)
-
-    # Encode procedural violations into ontology as ConstraintViolation individuals
-    for idx, msg in enumerate(violations, start=1):
-        v = ConstraintViolation(f"{service_name}_violation_{idx}", namespace=onto)
-        # Owlready2 does not natively support free-text annotations on individuals without property; we attach via rdfs:label
-        v.label = [msg]
-        service_ind.hasViolation.append(v)
-
-    # Close world for key properties to help the reasoner
-    close_world(service_ind, Properties=[hasDeclaration, hasReturn, hasStep, hasHttpMethod], recursive=True)
-
-    # Run reasoner
     with onto:
         try:
             sync_reasoner()
         except Exception:
-            # If reasoner fails (e.g., no HermiT), continue with procedural results only
             pass
 
-    # Classification check
     Valid_Service = onto.search_one(iri="*Valid_Service")
     Invalid_Service = onto.search_one(iri="*Invalid_Service")
 
@@ -560,7 +434,6 @@ def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = N
     elif Invalid_Service and service_ind in Invalid_Service.instances():
         classification = "Invalid"
 
-    # Final decision: invalid if any procedural violations
     is_valid = len(violations) == 0 and classification in ("Valid", "Unknown")
 
     return {

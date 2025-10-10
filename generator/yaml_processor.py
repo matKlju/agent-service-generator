@@ -1,5 +1,6 @@
 import yaml
 import logging
+from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ def extract_and_process_prepare_assignments(parsed_yaml: dict, input_data: dict)
     """Extracts and processes prepare.assign section, returning it as a YAML string."""
     llm_generated_prepare_assignments = ""
     if "prepare" in parsed_yaml and "assign" in parsed_yaml["prepare"]:
-        unwanted_keys = ["url", "httpMethod", "input", "serviceInput"]
+        unwanted_keys = ["url", "httpMethod", "input", "serviceInput", "apiUrl"]
         
         temp_assign_dict = {}
         for key, value in parsed_yaml["prepare"].get("assign", {}).items():
@@ -85,7 +86,7 @@ def extract_and_process_prepare_assignments(parsed_yaml: dict, input_data: dict)
 
         del parsed_yaml["prepare"]
 
-    return llm_generated_prepare_assignments
+    return llm_generated_prepare_assignments.rstrip()
 
 def remove_base_template_sections(parsed_yaml: dict) -> dict:
     """Removes sections that are part of the base template from the LLM-generated YAML."""
@@ -94,3 +95,56 @@ def remove_base_template_sections(parsed_yaml: dict) -> dict:
     if "return_result" in parsed_yaml:
         del parsed_yaml["return_result"]
     return parsed_yaml
+
+
+def format_workflow_steps(parsed_steps: Dict[str, Any]) -> str:
+    """Render workflow steps with a blank line separating each top-level step."""
+    step_blocks: List[str] = []
+    for step_name, step_body in parsed_steps.items():
+        step_yaml = yaml.dump(
+            {step_name: step_body},
+            indent=2,
+            default_flow_style=False,
+            sort_keys=False,
+        ).rstrip()
+        step_blocks.append(step_yaml)
+    return "\n\n".join(step_blocks) + ("\n" if step_blocks else "")
+
+
+def sanitize_http_calls(parsed_steps: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize HTTP steps to avoid embedding serviceInput directly in request URLs."""
+    for step_body in parsed_steps.values():
+        if not isinstance(step_body, dict):
+            continue
+
+        call_val = step_body.get("call")
+        if call_val not in ("http.get", "http.post", "http.put", "http.patch", "http.delete"):
+            continue
+
+        args = step_body.get("args")
+        if not isinstance(args, dict):
+            continue
+
+        url = args.get("url")
+        if isinstance(url, str) and "${apiUrl}" in url:
+            base_url = url.split("?", 1)[0]
+            args["url"] = base_url.replace("${serviceInput}", "")
+
+        query = args.get("query")
+        if isinstance(query, dict):
+            keys_to_remove = [
+                key for key, value in query.items()
+                if isinstance(value, str) and "${serviceInput}" in value
+            ]
+            for key in keys_to_remove:
+                del query[key]
+            if not query:
+                args.pop("query")
+
+        headers = args.get("headers")
+        if isinstance(headers, dict):
+            for key, value in list(headers.items()):
+                if isinstance(value, str) and "${serviceInput}" in value:
+                    headers[key] = value.replace("${serviceInput}", "")
+
+    return parsed_steps

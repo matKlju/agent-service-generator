@@ -1,6 +1,6 @@
 DSL/
 commit_message.txt
-
+input.json
 
 # Environments
 .env
