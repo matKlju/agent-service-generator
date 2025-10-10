@@ -109,3 +109,42 @@ def format_workflow_steps(parsed_steps: Dict[str, Any]) -> str:
         ).rstrip()
         step_blocks.append(step_yaml)
     return "\n\n".join(step_blocks) + ("\n" if step_blocks else "")
+
+
+def sanitize_http_calls(parsed_steps: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize HTTP steps to avoid embedding serviceInput directly in request URLs."""
+    for step_body in parsed_steps.values():
+        if not isinstance(step_body, dict):
+            continue
+
+        call_val = step_body.get("call")
+        if call_val not in ("http.get", "http.post", "http.put", "http.patch", "http.delete"):
+            continue
+
+        args = step_body.get("args")
+        if not isinstance(args, dict):
+            continue
+
+        url = args.get("url")
+        if isinstance(url, str) and "${apiUrl}" in url:
+            base_url = url.split("?", 1)[0]
+            args["url"] = base_url.replace("${serviceInput}", "")
+
+        query = args.get("query")
+        if isinstance(query, dict):
+            keys_to_remove = [
+                key for key, value in query.items()
+                if isinstance(value, str) and "${serviceInput}" in value
+            ]
+            for key in keys_to_remove:
+                del query[key]
+            if not query:
+                args.pop("query")
+
+        headers = args.get("headers")
+        if isinstance(headers, dict):
+            for key, value in list(headers.items()):
+                if isinstance(value, str) and "${serviceInput}" in value:
+                    headers[key] = value.replace("${serviceInput}", "")
+
+    return parsed_steps

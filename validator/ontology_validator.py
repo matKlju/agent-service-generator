@@ -361,10 +361,17 @@ def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = N
             violations.append(f"Step '{step_name}' is an HTTP GET call to DMAPPER, which is not allowed.")
         if isinstance(url, str) and "[#DMAPPER]" in url and call_type == "http.post" and step_name != "formatMessages":
             violations.append(f"Step '{step_name}' is an HTTP POST call to DMAPPER, but it is not the formatMessages step.")
+        if isinstance(url, str) and "${serviceInput}" in url:
+            violations.append(f"Step '{step_name}' should not embed 'serviceInput' directly in the request URL.")
         if call_type == "http.get" and ("body" in payload or "plaintext" in payload):
             violations.append(f"GET step '{step_name}' should not define a body")
         if call_type == "http.post" and ("body" not in payload and "plaintext" not in payload):
             violations.append(f"POST step '{step_name}' should define a body or plaintext")
+        query_payload = payload.get("query")
+        if isinstance(query_payload, dict):
+            for key, value in query_payload.items():
+                if isinstance(value, str) and "${serviceInput}" in value:
+                    violations.append(f"Query parameter '{key}' in step '{step_name}' should not reference 'serviceInput'.")
 
     # Formatting checks
     for idx, line in enumerate(yaml_text.splitlines(), start=1):
