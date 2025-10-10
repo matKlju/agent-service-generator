@@ -1,0 +1,7 @@
+{
+  "serviceName": "Test Service",
+  "description": "A simple test service",
+  "apiUrl": "https://api.example.com/test",
+  "httpMethod": "GET",
+  "serviceInput": ""
+}
