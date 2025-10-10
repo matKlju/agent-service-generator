@@ -22,6 +22,7 @@ prepare:
     chatId: ${incoming.params.chatId}
     authorId: ${incoming.params.authorId}
     serviceInput: ${incoming.params.input}
+    apiUrl: "{{API_URL}}"
     {{LLM_GENERATED_PREPARE_ASSIGNMENTS}}
   next: makeApiCall
 

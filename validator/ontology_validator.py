@@ -376,6 +376,15 @@ def validate_service_with_ontology(yaml_text: str, ontology_dir: Path | None = N
         if not re.search(rf"\n\n{re.escape(step_name)}:", yaml_text):
             violations.append(f"Step '{step_name}' should be separated from the previous step by an empty line.")
 
+    prepare_block = parsed.get("prepare") or {}
+    prepare_assign = prepare_block.get("assign") if isinstance(prepare_block, dict) else {}
+    if not isinstance(prepare_assign, dict):
+        prepare_assign = {}
+
+    uses_api_url_variable = any("${apiUrl}" in str(step_body) for step_body in steps.values())
+    if uses_api_url_variable and "apiUrl" not in prepare_assign:
+        violations.append("The workflow references '${apiUrl}' but no 'apiUrl' value is assigned in the prepare block.")
+
     if ontology_dir is None:
         ontology_dir = Path(__file__).resolve().parent.parent / "ontology"
 

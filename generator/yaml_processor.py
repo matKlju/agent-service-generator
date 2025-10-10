@@ -67,7 +67,7 @@ def extract_and_process_prepare_assignments(parsed_yaml: dict, input_data: dict)
     """Extracts and processes prepare.assign section, returning it as a YAML string."""
     llm_generated_prepare_assignments = ""
     if "prepare" in parsed_yaml and "assign" in parsed_yaml["prepare"]:
-        unwanted_keys = ["url", "httpMethod", "input", "serviceInput"]
+        unwanted_keys = ["url", "httpMethod", "input", "serviceInput", "apiUrl"]
         
         temp_assign_dict = {}
         for key, value in parsed_yaml["prepare"].get("assign", {}).items():
