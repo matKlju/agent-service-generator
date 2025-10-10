@@ -1,5 +1,6 @@
 import yaml
 import logging
+from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,7 @@ def extract_and_process_prepare_assignments(parsed_yaml: dict, input_data: dict)
 
         del parsed_yaml["prepare"]
 
-    return llm_generated_prepare_assignments
+    return llm_generated_prepare_assignments.rstrip()
 
 def remove_base_template_sections(parsed_yaml: dict) -> dict:
     """Removes sections that are part of the base template from the LLM-generated YAML."""
@@ -94,3 +95,17 @@ def remove_base_template_sections(parsed_yaml: dict) -> dict:
     if "return_result" in parsed_yaml:
         del parsed_yaml["return_result"]
     return parsed_yaml
+
+
+def format_workflow_steps(parsed_steps: Dict[str, Any]) -> str:
+    """Render workflow steps with a blank line separating each top-level step."""
+    step_blocks: List[str] = []
+    for step_name, step_body in parsed_steps.items():
+        step_yaml = yaml.dump(
+            {step_name: step_body},
+            indent=2,
+            default_flow_style=False,
+            sort_keys=False,
+        ).rstrip()
+        step_blocks.append(step_yaml)
+    return "\n\n".join(step_blocks) + ("\n" if step_blocks else "")
